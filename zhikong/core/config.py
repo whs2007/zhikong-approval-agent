@@ -82,6 +82,15 @@ class Settings:
     HIGH_RISK_THRESHOLD: float = _env_int("HIGH_RISK_THRESHOLD", 50000)
     MEDIUM_RISK_THRESHOLD: float = _env_int("MEDIUM_RISK_THRESHOLD", 5000)
 
+    # ---- 工具调用韧性（P1-1：超时 / 退避重试 / 熔断） ----
+    TOOL_TIMEOUT_SECONDS: float = _env_float("TOOL_TIMEOUT_SECONDS", 5.0)
+    TOOL_MAX_RETRIES: int = _env_int("TOOL_MAX_RETRIES", 3)
+    BREAKER_FAILURE_THRESHOLD: int = _env_int("BREAKER_FAILURE_THRESHOLD", 3)
+    BREAKER_RECOVERY_SECONDS: float = _env_float("BREAKER_RECOVERY_SECONDS", 30.0)
+    # 演示工具（SupplierOrderTool）的模拟失败率；生产接真实 API 时不使用。
+    # 测试环境由 conftest 置 0 以保证用例确定性。
+    TOOL_FAILURE_RATE: float = _env_float("TOOL_FAILURE_RATE", 0.4)
+
     # ---- 审批超时（进阶） ----
     APPROVAL_TIMEOUT_HOURS: int = _env_int("APPROVAL_TIMEOUT_HOURS", 24)
     APPROVAL_ESCALATE_HOURS: int = _env_int("APPROVAL_ESCALATE_HOURS", 72)

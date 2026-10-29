@@ -21,6 +21,13 @@ from services.audit_service import EventType, append
 from services.knowledge_service import search as kg_search
 from workflows.providers import LLMProvider, build_llm, enforce_risk_floor
 from workflows.state import WorkflowState
+from workflows.tools import (
+    CircuitBreaker,
+    SupplierOrderTool,
+    ToolError,
+    backoff_delay,
+    run_with_resilience,
+)
 
 _MAX_DETAIL_LEN = 2000
 
@@ -34,12 +41,37 @@ def _safe_detail(detail: str) -> str:
 
 
 def _backoff_delay(retry: int) -> float:
-    """指数退避 + 抖动：retry 为已失败次数（>=1 时在下次重试前调用）。"""
-    base = max(0.0, settings.RETRY_BASE_DELAY_SECONDS)
-    cap = max(base, settings.RETRY_MAX_DELAY_SECONDS)
-    raw = min(base * (2 ** max(retry - 1, 0)), cap)
-    jitter = min(max(settings.RETRY_JITTER, 0.0), 1.0)
-    return max(0.0, raw * (1 + random.uniform(-jitter, jitter)))
+    """指数退避 + 抖动：retry 为已失败次数（>=1 时在下次重试前调用）。
+
+    实现已下沉到 `workflows.tools.backoff_delay`（P1-1：重试集中在工具层），
+    此处保留薄封装以兼容既有调用与测试。
+    """
+    return backoff_delay(retry)
+
+
+# ----------------------------- 工具与熔断器（P1-1） -----------------------------
+
+_TOOL: Optional[Any] = None
+_BREAKER: Optional[CircuitBreaker] = None
+
+
+def _tool() -> Any:
+    """默认外部工具（供应商下单）。测试可 monkeypatch `agents._TOOL` 注入替身。"""
+    global _TOOL
+    if _TOOL is None:
+        _TOOL = SupplierOrderTool()
+    return _TOOL
+
+
+def _breaker() -> CircuitBreaker:
+    """进程内熔断器单例。测试可 monkeypatch `agents._BREAKER` 注入替身。"""
+    global _BREAKER
+    if _BREAKER is None:
+        _BREAKER = CircuitBreaker(
+            failure_threshold=settings.BREAKER_FAILURE_THRESHOLD,
+            recovery_seconds=settings.BREAKER_RECOVERY_SECONDS,
+        )
+    return _BREAKER
 
 _LLM: Optional[LLMProvider] = None
 
@@ -179,43 +211,54 @@ def executor_node(state: WorkflowState) -> dict:
 
     append(EventType.EXEC_START, actor="executor", actor_role="system",
            thread_id=tid, trace_id=trace, node="executor",
-           detail={"attempt": retry + 1, "max": settings.MAX_RETRY})
+           detail={"attempt": retry + 1, "max_tool_retries": settings.TOOL_MAX_RETRIES,
+                   "timeout": settings.TOOL_TIMEOUT_SECONDS})
     logger.info(f"[executor] thread={tid} 第 {retry + 1} 次执行")
 
     try:
-        # 模拟外部执行：第3次必成功，否则 60% 概率成功（可替换为真实业务 API）
-        success = (retry + 1 >= 3) or random.random() > 0.4
-        if success:
-            report = (
-                "执行报告(企业版)\n"
-                f"- 事项: {state['request_detail']}\n"
-                f"- 金额: ¥{state['amount']:,.2f}\n"
-                f"- 部门: {state.get('department','')}\n"
-                "- 状态: 已完成（已写入审计）"
-            )
-            # 先落地台账为 success，再写审计：确保崩溃恢复时台账已是最终态，
-            # 避免「执行完成但未记账」导致重放重复副作用。
-            idem.update_status(idem_key, "success", "success", report)
-            append(EventType.EXEC_RESULT, actor="executor", actor_role="system",
-                   thread_id=tid, trace_id=trace, node="executor",
-                   phase_after="done",
-                   detail={"result": "success", "attempt": retry + 1})
-            return {
-                "execution_result": "success",
-                "final_report": report,
-                "current_phase": "done",
-                "logs": [f"[执行Agent] ✅ 第{retry + 1}次成功"],
-            }
-        # 失败：准备重试（图级别循环，下次进入前退避）
-        append(EventType.RETRY, actor="executor", actor_role="system",
+        # P1-1：调用真实工具，由工具层负责超时 + 指数退避重试 + 熔断（不再用 random 模拟）
+        payload = {
+            "request_type": state.get("request_type"),
+            "request_detail": state.get("request_detail"),
+            "amount": state.get("amount"),
+            "department": state.get("department"),
+            "idempotency_key": idem_key,
+        }
+        _outcome, attempts = run_with_resilience(_tool(), payload, breaker=_breaker())
+        tool_name = getattr(_tool(), "name", "unknown")
+        report = (
+            "执行报告(企业版)\n"
+            f"- 事项: {state['request_detail']}\n"
+            f"- 金额: ¥{state['amount']:,.2f}\n"
+            f"- 部门: {state.get('department','')}\n"
+            f"- 工具: {tool_name}（第 {attempts} 次尝试成功）\n"
+            "- 状态: 已完成（已写入审计）"
+        )
+        # 先落地台账为 success，再写审计：确保崩溃恢复时台账已是最终态，
+        # 避免「执行完成但未记账」导致重放重复副作用。
+        idem.update_status(idem_key, "success", "success", report)
+        append(EventType.EXEC_RESULT, actor="executor", actor_role="system",
                thread_id=tid, trace_id=trace, node="executor",
-               detail={"attempt": retry + 1, "reason": "模拟供应商 API 超时"},
-               level="WARN")
+               phase_after="done",
+               detail={"result": "success", "attempts": attempts, "tool": tool_name})
+        return {
+            "execution_result": "success",
+            "final_report": report,
+            "current_phase": "done",
+            "logs": [f"[执行Agent] ✅ 调用工具 '{tool_name}' 成功（第{attempts}次尝试）"],
+        }
+    except ToolError as e:
+        # 工具层已耗尽重试 / 不可重试 / 熔断开路 -> 终态失败（图级不再自循环重试）
+        kind = getattr(e, "kind", None)
+        append(EventType.EXEC_RESULT, actor="executor", actor_role="system",
+               thread_id=tid, trace_id=trace, node="executor", level="ERROR",
+               detail={"result": "failed", "error": str(e),
+                       "kind": kind.value if hasattr(kind, "value") else None})
         return {
             "execution_result": "failed",
             "retry_count": retry + 1,
-            "error": "模拟供应商 API 超时",
-            "logs": [f"[执行Agent] ⚠ 第{retry + 1}次失败，准备重试"],
+            "error": str(e),
+            "logs": [f"[执行Agent] ❌ 工具调用失败: {e}"],
         }
     except Exception as e:  # pragma: no cover
         append(EventType.EXEC_RESULT, actor="executor", actor_role="system",
@@ -257,8 +300,7 @@ def route_after_approval_gate(state: WorkflowState) -> str:
 
 
 def route_after_execution(state: WorkflowState) -> str:
-    if state.get("execution_result") == "success":
-        return "monitor"
-    if int(state.get("retry_count", 0)) >= settings.MAX_RETRY:
-        return "monitor"
-    return "executor"
+    # P1-1：技术性重试已下沉到工具层（workflows.tools.run_with_resilience），
+    # 图级不再自循环重试，避免"图级重试 × 工具层重试"叠加放大调用次数；
+    # 此处只负责终态收敛，成败都交由 monitor 汇总。
+    return "monitor"

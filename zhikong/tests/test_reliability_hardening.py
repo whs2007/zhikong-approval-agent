@@ -107,7 +107,15 @@ def test_executor_idempotent_no_duplicate_side_effect(monkeypatch, tmp_path):
     idem = _isolate_ledger(monkeypatch, tmp_path)
     from workflows import agents
 
-    monkeypatch.setattr(agents.random, "random", lambda: 1.0)  # 强制成功(>0.4)
+    class OkTool:
+        """总是成功的工具替身（替代原 monkeypatch random.random 的做法）。"""
+
+        name = "ok_tool"
+
+        def call(self, payload, timeout=None):
+            return "下单成功"
+
+    monkeypatch.setattr(agents, "_TOOL", OkTool())
 
     state = {
         "thread_id": "t-idem", "trace_id": "tr-idem", "retry_count": 0,
@@ -134,7 +142,13 @@ def test_executor_crash_window_replay_is_safe(monkeypatch, tmp_path):
     idem = _isolate_ledger(monkeypatch, tmp_path)
     from workflows import agents
 
-    monkeypatch.setattr(agents.random, "random", lambda: 1.0)  # 强制成功(>0.4)
+    class OkTool:
+        name = "ok_tool"
+
+        def call(self, payload, timeout=None):
+            return "下单成功"
+
+    monkeypatch.setattr(agents, "_TOOL", OkTool())
 
     state = {
         "thread_id": "t-crash", "trace_id": "tr-crash", "retry_count": 0,

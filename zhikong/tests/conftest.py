@@ -25,6 +25,20 @@ def _build_knowledge():
     ks.build()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _deterministic_tools():
+    """测试环境下让默认工具确定性成功，消除随机失败率导致的 flaky 用例。
+
+    原因（P1-1）：executor 现调用真实工具 SupplierOrderTool，其失败率若在测试下
+    保持 0.4，则「依赖最终成功」的集成用例会有约 6% 概率失败。
+    工具韧性专项测试（tests/test_tools_resilience.py）显式注入自己的工具替身，
+    不受本 fixture 影响。
+    """
+    from core.config import settings
+    settings.TOOL_FAILURE_RATE = 0.0
+    settings.TOOL_TIMEOUT_SECONDS = 2.0
+
+
 @pytest.fixture
 def client():
     with TestClient(app) as c:
