@@ -61,10 +61,11 @@
 <div id="login" class="wrap" style="grid-template-columns:1fr;max-width:380px;margin:60px auto;">
   <div class="col">
     <h2>登录</h2>
-    <label>用户名</label><input id="lu" value="admin" />
-    <label>密码</label><input id="lp" type="password" value="admin123" />
+    <label>用户名</label><input id="lu" placeholder="请输入用户名" autocomplete="username" />
+    <label>密码</label><input id="lp" type="password" placeholder="请输入密码" autocomplete="current-password" />
     <button id="loginBtn">登录</button>
-    <p class="muted">默认账号：admin/admin123（管理员）· approver01/approver123（审批人）· applicant01/applicant123（申请人）</p>
+    <p class="muted">账号需由管理员创建（生产环境用 <code>POST /auth/init-admin</code> 冷启动引导）；
+      演示环境（DEMO_SEED=1）的随机口令见服务启动日志，前端不预设任何凭据。</p>
   </div>
 </div>
 

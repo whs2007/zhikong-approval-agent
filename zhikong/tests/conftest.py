@@ -12,6 +12,17 @@ os.environ["AUDIT_DB"] = os.path.join(_TMP, "audit.db")
 os.environ["DB_URL"] = f"sqlite:///{os.path.join(_TMP, 'zhikong.db')}"
 os.environ["LLM_PROVIDER"] = "rule"
 os.environ["EMBEDDING_PROVIDER"] = "local"
+# P1-8：演示种子默认关闭，测试显式开启并注入自己的强口令，
+# 不依赖任何代码内默认凭据（避免测试与"可用的默认口令"互相绑定）。
+DEMO_PASSWORDS = {
+    "admin": "Test#Admin-2026",
+    "approver01": "Test#Approver-2026",
+    "applicant01": "Test#Applicant-2026",
+}
+os.environ["DEMO_SEED"] = "1"
+os.environ["DEMO_ADMIN_PASSWORD"] = DEMO_PASSWORDS["admin"]
+os.environ["DEMO_APPROVER_PASSWORD"] = DEMO_PASSWORDS["approver01"]
+os.environ["DEMO_APPLICANT_PASSWORD"] = DEMO_PASSWORDS["applicant01"]
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,14 +65,14 @@ def _login(client, username, password):
 
 @pytest.fixture
 def applicant_token(client):
-    return _login(client, "applicant01", "applicant123")
+    return _login(client, "applicant01", DEMO_PASSWORDS["applicant01"])
 
 
 @pytest.fixture
 def approver_token(client):
-    return _login(client, "approver01", "approver123")
+    return _login(client, "approver01", DEMO_PASSWORDS["approver01"])
 
 
 @pytest.fixture
 def admin_token(client):
-    return _login(client, "admin", "admin123")
+    return _login(client, "admin", DEMO_PASSWORDS["admin"])

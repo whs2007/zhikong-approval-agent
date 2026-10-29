@@ -43,9 +43,20 @@ class Settings:
     ENV: str = _env("ENV", "dev")
 
     # ---- 安全 ----
-    SECRET_KEY: str = _env("SECRET_KEY", "dev-secret-change-me-in-prod")
+    # 代码库内不含任何可用密钥：缺省为空，由 _ensure_dev_secret 在非生产环境
+    # 生成随机密钥并持久化到 data/db/.dev_secret（已 gitignore），生产环境缺失即启动失败。
+    SECRET_KEY: str = _env("SECRET_KEY", "")
     JWT_EXPIRE_MINUTES: int = _env_int("JWT_EXPIRE_MINUTES", 60)
     JWT_ALG: str = "HS256"
+
+    # ---- 演示账号种子（默认关闭） ----
+    # 安全基线：任何环境都不会凭代码默认值自动创建可登录账号。
+    # 仅当 ENV ∈ {dev,development,local,test} 且 DEMO_SEED=1 时创建；口令必须来自环境变量，
+    # 未提供则随机生成并打印到日志（一次性，不落代码、不落仓库）。
+    DEMO_SEED: bool = _env_bool("DEMO_SEED", False)
+    DEMO_ADMIN_PASSWORD: str = _env("DEMO_ADMIN_PASSWORD", "")
+    DEMO_APPROVER_PASSWORD: str = _env("DEMO_APPROVER_PASSWORD", "")
+    DEMO_APPLICANT_PASSWORD: str = _env("DEMO_APPLICANT_PASSWORD", "")
 
     # ---- 业务库 / 审计库（sqlite 文件，生产可换 PG 连接串） ----
     DB_URL: str = _env("DB_URL", f"sqlite:///{DB_DIR / 'zhikong.db'}")
@@ -100,24 +111,67 @@ class Settings:
     PORT: int = _env_int("PORT", 8000)
     CORS_ORIGINS: list[str] = [o.strip() for o in _env("CORS_ORIGINS", "*").split(",") if o.strip()]
 
-    # ----------------------- 生产自检 -----------------------
-    _PROD_DEFAULT_SECRET = "dev-secret-change-me-in-prod"
+    # ----------------------- 环境判定 -----------------------
+
+    # 仅这些环境允许演示种子（白名单制，避免 ENV 拼错/自定义值意外放行）
+    _DEMO_ENV_WHITELIST = ("dev", "development", "local", "test")
 
     def is_production(self) -> bool:
         """是否生产环境。ENV ∈ {prod, production} 视为生产。"""
         return self.ENV.strip().lower() in ("prod", "production")
 
+    def is_demo_seed_allowed(self) -> bool:
+        """是否允许创建演示账号。白名单环境 + 显式 DEMO_SEED=1，二者缺一不可。"""
+        return (
+            self.ENV.strip().lower() in self._DEMO_ENV_WHITELIST
+            and self.DEMO_SEED
+        )
+
+    # ----------------------- 密钥自愈（仅非生产） -----------------------
+
+    @staticmethod
+    def _dev_secret_path() -> Path:
+        return DB_DIR / ".dev_secret"
+
+    def _ensure_dev_secret(self) -> None:
+        """非生产环境且未配置 SECRET_KEY 时，生成随机密钥并持久化。
+
+        目的：代码库不再携带任何可用密钥（含"弱但可用"的默认值），
+        同时保证开发/测试开箱可用——密钥存于 data/db/.dev_secret（已被 .gitignore 覆盖），
+        重启后复用，避免每次启动都让已签发 token 失效。
+        """
+        if self.SECRET_KEY or self.is_production():
+            return
+        path = self._dev_secret_path()
+        if path.exists():
+            saved = path.read_text(encoding="utf-8").strip()
+            if saved:
+                self.SECRET_KEY = saved
+                return
+        import secrets
+
+        generated = secrets.token_urlsafe(48)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(generated, encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        self.SECRET_KEY = generated
+
+    # ----------------------- 生产自检 -----------------------
+
     def validate_for_production(self) -> None:
-        """生产环境启动前自检：杜绝使用示例/空/弱密钥上线。
+        """生产环境启动前自检：杜绝使用空/弱密钥或演示种子上线。
 
         仅在 is_production() 为 True 时生效；开发与测试环境（默认 ENV=dev）
         始终跳过，不影响 pytest 与本地联调。
         """
         if not self.is_production():
             return
-        if not self.SECRET_KEY or self.SECRET_KEY == self._PROD_DEFAULT_SECRET:
+        if not self.SECRET_KEY:
             raise RuntimeError(
-                "生产环境禁止使用示例/空 SECRET_KEY，请设置环境变量 SECRET_KEY 为 "
+                "生产环境禁止空 SECRET_KEY，请设置环境变量 SECRET_KEY 为 "
                 "≥32 位的随机串（如 `openssl rand -hex 32`）。"
             )
         if len(self.SECRET_KEY) < 32:
@@ -125,6 +179,11 @@ class Settings:
                 f"生产环境 SECRET_KEY 长度不足（当前 {len(self.SECRET_KEY)} 位），"
                 f"要求 ≥32 位以降低被暴力破解的风险。"
             )
+        if self.DEMO_SEED:
+            raise RuntimeError(
+                "生产环境禁止开启 DEMO_SEED（会自动创建演示账号），请移除该配置。"
+            )
 
 
 settings = Settings()
+settings._ensure_dev_secret()

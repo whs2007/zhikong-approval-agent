@@ -1,7 +1,8 @@
 """认证与用户服务（RBAC）。
 
 - 用户存储于独立 SQLite（zhikong.db），PBKDF2 密码哈希（见 core.security）。
-- 首次启动创建默认管理员（admin/admin123），并预置演示审批人/申请人。
+- 代码内**不含任何可用口令**：演示账号仅在 ENV∈{dev,development,local,test} 且
+  DEMO_SEED=1 时创建，口令取环境变量，未提供则随机生成并打印到日志。
 - 认证接口由 api/deps.py 依赖注入调用。
 """
 from __future__ import annotations
@@ -39,28 +40,56 @@ def _conn_get() -> sqlite3.Connection:
 
 
 def _seed() -> None:
+    """按需创建演示账号。
+
+    安全基线（P1-8）：代码内不硬编码任何口令。
+    - 白名单环境（ENV∈{dev,development,local,test}）+ 显式 DEMO_SEED=1 才创建；
+    - 口令取自环境变量 DEMO_*_PASSWORD；未提供则随机生成并打印到日志（一次性，不落仓库）；
+    - 其余情况（含生产、以及 ENV 拼成 staging/uat 等自定义值）一律不创建，
+      首个管理员须通过 /api/v1/auth/init-admin 冷启动引导。
+    """
     cur = _conn_get()
     cnt = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     if cnt > 0:
         return
-    # 生产环境不预置任何弱口令演示账号；首个管理员须通过 /auth/init-admin 冷启动引导
-    if settings.is_production():
-        logger.info("[auth] 生产环境：跳过默认账号种子，请通过 /api/v1/auth/init-admin 引导首个管理员")
+    if not settings.is_demo_seed_allowed():
+        logger.info(
+            "[auth] 未启用演示种子（需 ENV∈{dev,development,local,test} 且 DEMO_SEED=1）；"
+            "请通过 /api/v1/auth/init-admin 引导首个管理员"
+        )
         return
+
+    import secrets
+
+    def _pwd(explicit: str) -> tuple[str, bool]:
+        """返回 (口令, 是否随机生成)。"""
+        if explicit:
+            return explicit, False
+        return "Demo#" + secrets.token_urlsafe(9), True
+
     defaults = [
-        ("admin", "admin123", "admin", "系统管理员"),
-        ("approver01", "approver123", "approver", "审批人-张经理"),
-        ("applicant01", "applicant123", "applicant", "申请人-小李"),
+        ("admin", settings.DEMO_ADMIN_PASSWORD, "admin", "系统管理员"),
+        ("approver01", settings.DEMO_APPROVER_PASSWORD, "approver", "审批人-张经理"),
+        ("applicant01", settings.DEMO_APPLICANT_PASSWORD, "applicant", "申请人-小李"),
     ]
     now = datetime.now().isoformat(timespec="seconds")
-    for username, pwd, role, name in defaults:
+    generated: list[str] = []
+    for username, raw_pwd, role, name in defaults:
+        pwd, is_random = _pwd(raw_pwd)
+        if is_random:
+            generated.append(f"{username}={pwd}")
         cur.execute(
             "INSERT OR IGNORE INTO users (id,username,hashed_password,role,display_name,created_at,is_active) "
             "VALUES (?,?,?,?,?,?,1)",
             (uuid.uuid4().hex, username, hash_password(pwd), role, name, now),
         )
     cur.commit()
-    logger.info("[auth] seeded default users (admin/approver01/applicant01)")
+    if generated:
+        logger.warning(
+            "[auth] 已随机生成演示账号口令（仅本次可见，重启后复用）：" + " · ".join(generated)
+        )
+    else:
+        logger.info("[auth] 已按环境变量创建演示账号：admin/approver01/applicant01")
 
 
 def create_user(username: str, password: str, role: str, display_name: str) -> User:

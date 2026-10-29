@@ -48,7 +48,7 @@
 - 权限：匿名
 - 请求：
 ```json
-{ "username": "admin", "password": "admin123" }
+{ "username": "admin", "password": "<你的口令>" }
 ```
 - 响应：
 ```json

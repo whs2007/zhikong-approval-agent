@@ -1,10 +1,12 @@
 """接口与鉴权测试。"""
 from __future__ import annotations
 
+from tests.conftest import DEMO_PASSWORDS
+
 
 def test_login_success(client):
     r = client.post("/api/v1/auth/login",
-                    json={"username": "admin", "password": "admin123"})
+                    json={"username": "admin", "password": DEMO_PASSWORDS["admin"]})
     assert r.status_code == 200
     assert r.json()["data"]["role"] == "admin"
 

@@ -13,7 +13,9 @@ venv/
 
 # 运行期产物：SQLite 业务库/审计库/checkpoint/幂等台账
 # 注意：data/knowledge/ 是知识库源文件，必须入库，不可忽略
-data/db/
+# 注意：模式含中间斜杠时会被锚定到 .gitignore 所在层级，故此处用 **/ 前缀覆盖任意层级
+**/data/db/
+**/.dev_secret
 *.db
 *.db-wal
 *.db-shm

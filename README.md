@@ -63,7 +63,13 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 - 前端看板：`http://localhost:8000/`
 - API 文档：`http://localhost:8000/docs`
-- 默认账号：`admin/admin123`（管理员）、`approver01/approver123`（审批人）、`applicant01/applicant123`（申请人）
+- **账号说明**：代码库内不含任何可用口令。演示环境需显式开启种子并自行注入口令：
+  ```bash
+  DEMO_SEED=1 DEMO_ADMIN_PASSWORD='你的强口令' DEMO_APPROVER_PASSWORD='...' DEMO_APPLICANT_PASSWORD='...' \
+    uvicorn api.main:app
+  ```
+  不提供 `DEMO_*_PASSWORD` 时会**随机生成**并打印在启动日志中。生产环境请用
+  `POST /api/v1/auth/init-admin` 冷启动引导首个管理员（`DEMO_SEED` 在生产会被拒绝启动）。
 
 > 未配置任何外部 API Key 也能完整跑通演示（RAG 用本地 n-gram 向量检索，分析用规则兜底）。配置 `LLM_PROVIDER=openai/dashscope`、`EMBEDDING_PROVIDER=st` 即可切换为真实大模型，业务代码零改动。
 

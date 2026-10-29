@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -17,12 +18,18 @@ from services import auth_service as au
 
 # ----------------------- 1) 生产密钥合规自检 -----------------------
 
-def test_validate_prod_blocks_code_default_key():
+def test_no_hardcoded_default_secret():
+    """反例（P1-8）：代码库不得再携带任何"开箱可用"的默认密钥。"""
+    import inspect
+
+    from core import config as cfg
+
+    src = inspect.getsource(cfg)
+    assert "dev-secret-change-me-in-prod" not in src, "源码中仍存在旧默认密钥"
+    # 未配置环境变量时，Settings 的默认密钥必须为空（由 _ensure_dev_secret 为 dev 现场生成）
     s = Settings()
     s.ENV = "prod"
-    s.SECRET_KEY = "dev-secret-change-me-in-prod"  # 代码默认值
-    with pytest.raises(RuntimeError):
-        s.validate_for_production()
+    assert os.environ.get("SECRET_KEY", "") == cfg._env("SECRET_KEY", "")
 
 
 def test_validate_prod_blocks_empty_key():
@@ -45,13 +52,14 @@ def test_validate_prod_ok_with_strong_key():
     s = Settings()
     s.ENV = "prod"
     s.SECRET_KEY = "a" * 48  # ≥32 位随机串
+    s.DEMO_SEED = False      # 生产不得开启演示种子（conftest 为测试开启了它）
     s.validate_for_production()  # 不应抛异常
 
 
-def test_dev_skips_validation_with_default_key():
+def test_dev_skips_validation_without_key():
     s = Settings()
     s.ENV = "dev"
-    s.SECRET_KEY = "dev-secret-change-me-in-prod"
+    s.SECRET_KEY = ""
     s.validate_for_production()  # dev 下跳过，不应抛异常
 
 
@@ -82,10 +90,57 @@ def test_seed_skipped_in_prod(monkeypatch, tmp_path):
 
 
 def test_seed_runs_in_dev(monkeypatch, tmp_path):
-    _point_auth_to(tmp_path, monkeypatch, env="dev")
+    """白名单环境 + 显式 DEMO_SEED=1 + 环境变量口令 -> 创建演示账号。"""
+    s = _point_auth_to(tmp_path, monkeypatch, env="dev")
+    s.DEMO_SEED = True
+    s.DEMO_ADMIN_PASSWORD = "Test#Admin-2026"
+    s.DEMO_APPROVER_PASSWORD = "Test#Approver-2026"
+    s.DEMO_APPLICANT_PASSWORD = "Test#Applicant-2026"
     au._seed()
     assert au.get_by_username("admin") is not None
     assert au.get_user_count() == 3
+    assert au.authenticate("admin", "Test#Admin-2026") is not None
+
+
+def test_seed_disabled_by_default(monkeypatch, tmp_path):
+    """反例（P1-8）：默认不创建任何账号，即使处于 dev 环境。"""
+    s = _point_auth_to(tmp_path, monkeypatch, env="dev")
+    s.DEMO_SEED = False
+    au._seed()
+    assert au.get_user_count() == 0
+    assert au.get_by_username("admin") is None
+
+
+def test_seed_blocked_for_custom_env(monkeypatch, tmp_path):
+    """反例（P1-8）：ENV 拼成 staging/uat/preprod/空 时种子必须失效（白名单制）。"""
+    for env in ("staging", "uat", "preprod", "PROD-ish", ""):
+        s = _point_auth_to(tmp_path, monkeypatch, env=env)
+        s.DEMO_SEED = True
+        au._seed()
+        assert au.get_user_count() == 0, f"ENV={env} 意外放行了演示种子"
+
+
+def test_seed_random_password_when_env_missing(monkeypatch, tmp_path):
+    """反例：未提供 DEMO_*_PASSWORD 时随机生成，常见弱口令一律不可用。"""
+    s = _point_auth_to(tmp_path, monkeypatch, env="dev")
+    s.DEMO_SEED = True
+    s.DEMO_ADMIN_PASSWORD = ""
+    s.DEMO_APPROVER_PASSWORD = ""
+    s.DEMO_APPLICANT_PASSWORD = ""
+    au._seed()
+    assert au.get_user_count() == 3
+    for weak in ("admin123", "applicant123", "approver123", "password"):
+        assert au.authenticate("admin", weak) is None
+
+
+def test_prod_rejects_demo_seed():
+    """反例：生产环境开启 DEMO_SEED 必须启动失败。"""
+    s = Settings()
+    s.ENV = "prod"
+    s.SECRET_KEY = "a" * 48
+    s.DEMO_SEED = True
+    with pytest.raises(RuntimeError):
+        s.validate_for_production()
 
 
 # ----------------------- 3) init-admin 冷启动引导 -----------------------
