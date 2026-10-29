@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+.venv/
+venv/
+.env
+
+# 运行期产物：SQLite 业务库/审计库/checkpoint/幂等台账
+# 注意：data/knowledge/ 是知识库源文件，必须入库，不可忽略
+data/db/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+.DS_Store

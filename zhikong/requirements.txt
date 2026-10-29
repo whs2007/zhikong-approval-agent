@@ -1,0 +1,21 @@
+# 智控 · 企业级智能工作流平台 - 依赖清单
+# 核心依赖（必装）
+langgraph>=1.0
+langgraph-checkpoint-sqlite>=2.0
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+numpy>=1.26
+httpx>=0.27
+pytest>=8.0
+
+# 可选：启用 Sentence-Transformers 本地语义 Embedding（替代默认 n-gram）
+# sentence-transformers>=2.5
+
+# 可选：启用 OpenAI / 通义千问 LLM 风险分析（替代默认规则兜底）
+# openai>=1.0
+
+# 可选：生产数据库驱动（Checkpointer 切 Postgres 时使用）
+# 注意：本项目的 auth/audit 业务库仍为 SQLite；水平扩展前需一并迁移至 PG。
+# langgraph-checkpoint-postgres>=2.0
+# psycopg[binary]>=3.1

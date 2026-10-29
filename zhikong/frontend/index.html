@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>智控 · 企业级智能工作流平台</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+         --pri:#3b82f6; --ok:#34d399; --warn:#fbbf24; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--txt); }
+  header { padding:16px 24px; background:linear-gradient(90deg,#1e293b,#0f172a);
+           border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:18px; margin:0; }
+  header .badge { font-size:12px; color:var(--mut); }
+  .wrap { display:grid; grid-template-columns:1.1fr 1.3fr 1fr; gap:16px; padding:16px; }
+  .col { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  h2 { font-size:14px; margin:0 0 12px; color:#cbd5e1; }
+  label { display:block; font-size:12px; color:var(--mut); margin:10px 0 4px; }
+  input,select,textarea,button { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+       background:#0b1220; color:var(--txt); font-size:13px; }
+  textarea { resize:vertical; min-height:64px; }
+  button { background:var(--pri); color:#fff; border:none; cursor:pointer; font-weight:600; margin-top:8px; }
+  button.sec { background:#475569; }
+  button.ok { background:var(--ok); color:#06281c; }
+  button.bad { background:var(--bad); color:#3b0a0a; }
+  .row { display:flex; gap:8px; }
+  .kv { font-size:12px; margin:4px 0; }
+  .kv b { color:var(--mut); font-weight:500; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; margin-left:6px; }
+  .pill.low{background:#064e3b;color:#6ee7b7;} .pill.medium{background:#78350f;color:#fcd34d;}
+  .pill.high{background:#7f1d1d;color:#fca5a5;} .pill.approved{background:#064e3b;color:#6ee7b7;}
+  .pill.rejected{background:#7f1d1d;color:#fca5a5;} .pill.pending{background:#78350f;color:#fcd34d;}
+  .logs { font-size:12px; background:#0b1220; border:1px solid var(--line); border-radius:8px;
+         padding:8px; max-height:220px; overflow:auto; }
+  .logs div { padding:2px 0; border-bottom:1px dashed #1f2b3d; }
+  .node { display:flex; align-items:center; gap:8px; padding:8px; border-radius:8px; border:1px solid var(--line);
+          margin:6px 0; font-size:13px; }
+  .node .ic { font-size:18px; } .node .st { margin-left:auto; font-size:12px; }
+  .ok{color:var(--ok);} .warn{color:var(--warn);} .mut{color:var(--mut);}
+  .muted{color:var(--mut);font-size:12px;}
+  pre { white-space:pre-wrap; word-break:break-all; font-size:12px; background:#0b1220;
+        border:1px solid var(--line); border-radius:8px; padding:8px; max-height:200px; overflow:auto; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { border:1px solid var(--line); padding:4px 6px; text-align:left; }
+  .hide { display:none; }
+  .toast { position:fixed; top:16px; right:16px; background:var(--card); border:1px solid var(--line);
+           padding:10px 14px; border-radius:8px; font-size:13px; }
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:22px">🎯</span>
+  <h1>智控 · 企业级智能工作流平台</h1>
+  <span class="badge">LangGraph 多 Agent · RAG · Human-in-the-Loop · 审计</span>
+  <span class="badge" id="who" style="margin-left:auto"></span>
+</header>
+
+<div id="login" class="wrap" style="grid-template-columns:1fr;max-width:380px;margin:60px auto;">
+  <div class="col">
+    <h2>登录</h2>
+    <label>用户名</label><input id="lu" value="admin" />
+    <label>密码</label><input id="lp" type="password" value="admin123" />
+    <button id="loginBtn">登录</button>
+    <p class="muted">默认账号：admin/admin123（管理员）· approver01/approver123（审批人）· applicant01/applicant123（申请人）</p>
+  </div>
+</div>
+
+<div id="app" class="wrap hide">
+  <!-- 左：提交 -->
+  <div class="col">
+    <h2>📝 提交采购申请</h2>
+    <label>申请类型</label>
+    <select id="rtype"><option value="procurement">采购申请</option>
+      <option value="expense">费用报销</option><option value="leave">请假</option></select>
+    <label>申请详情</label>
+    <textarea id="rdetail" placeholder="例如：采购50台笔记本电脑用于研发团队"></textarea>
+    <div class="grid2">
+      <div><label>金额（元）</label><input id="ramt" type="number" value="300000" /></div>
+      <div><label>部门</label><input id="rdept" value="技术部" /></div>
+    </div>
+    <div class="row">
+      <button id="submitBtn">🚀 提交工作流</button>
+      <button class="sec" id="quickLow">¥3,000</button>
+      <button class="sec" id="quickHigh">¥300,000</button>
+    </div>
+    <hr style="border-color:var(--line);margin-top:14px"/>
+    <h2>📊 指标</h2>
+    <div id="metrics" class="muted">点击右上角刷新</div>
+    <button class="sec" id="refreshMetrics">刷新指标 / 知识库状态</button>
+  </div>
+
+  <!-- 中：状态 -->
+  <div class="col">
+    <h2>📊 工作流状态</h2>
+    <div id="state" class="muted">提交后将在此显示状态…</div>
+    <div id="apprArea" class="hide" style="margin-top:10px;border:1px solid var(--warn);border-radius:8px;padding:10px;">
+      <b class="warn">🔔 等待人工审批</b>
+      <label>审批意见（可选）</label><input id="comment" placeholder="请输入审批意见" />
+      <div class="row">
+        <button class="ok" id="approveBtn">✅ 批准并恢复</button>
+        <button class="bad" id="rejectBtn">❌ 驳回</button>
+      </div>
+    </div>
+    <h2 style="margin-top:14px">📋 执行日志</h2>
+    <div id="logs" class="logs"></div>
+    <h2 style="margin-top:14px">📄 分析报告 / 最终报告</h2>
+    <pre id="reports">—</pre>
+  </div>
+
+  <!-- 右：节点 + 审计 -->
+  <div class="col">
+    <h2>🔍 LangGraph 节点</h2>
+    <div id="nodes"></div>
+    <h2 style="margin-top:14px">🔎 待审批列表</h2>
+    <div id="pending" class="muted">无</div>
+    <button class="sec" id="refreshPending">刷新待办</button>
+    <h2 style="margin-top:14px">🧾 审计查询（管理员）</h2>
+    <label>按 thread_id 查询</label><input id="aq" placeholder="留空查全部" />
+    <button class="sec" id="auditBtn">查询审计日志</button>
+    <button class="sec" id="auditExport">导出 CSV</button>
+    <div id="auditOut" class="logs" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hide"></div>
+
+<script>
+const A = (p)=>`/api/v1${p}`;
+let TOKEN=null, ME=null, CUR=null;
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.remove('hide');setTimeout(()=>t.classList.add('hide'),2200);}
+function auth(){return {Authorization:'Bearer '+TOKEN};}
+async function api(method,path,body){
+  const opt={method,headers:{'Content-Type':'application/json',...auth()}};
+  if(body)opt.body=JSON.stringify(body);
+  const r=await fetch(A(path),opt);
+  if(r.status===401){toast('未认证或已过期');return null;}
+  const j=await r.json().catch(()=>({code:1,message:'解析失败'}));
+  return j;
+}
+document.getElementById('loginBtn').onclick=async()=>{
+  const j=await (async()=>{const r=await fetch(A('/auth/login'),{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:lu.value,password:lp.value})});return r.json();})();
+  if(j.code!==0){toast(j.message||'登录失败');return;}
+  TOKEN=j.data.access_token; ME=j.data;
+  document.getElementById('who').textContent=`${ME.display_name}(${ME.role})`;
+  document.getElementById('login').classList.add('hide');
+  document.getElementById('app').classList.remove('hide');
+  refreshPending(); refreshMetrics();
+};
+function setVal(id,v){document.getElementById(id).value=v;}
+document.getElementById('quickLow').onclick=()=>setVal('ramt',3000);
+document.getElementById('quickHigh').onclick=()=>setVal('ramt',300000);
+
+document.getElementById('submitBtn').onclick=async()=>{
+  const body={request_type:rtype.value,request_detail:rdetail.value,
+    amount:parseFloat(ramt.value||0),department:rdept.value};
+  const j=await api('POST','/workflow/submit',body);
+  if(!j)return; if(j.code!==0){toast(j.message);return;}
+  CUR=j.data; renderState(j.data); toast(j.message); refreshPending();
+};
+
+function riskPill(r){return `<span class="pill ${r}">${r}</span>`;}
+function apprPill(a){return `<span class="pill ${a}">${a}</span>`;}
+function renderState(d){
+  document.getElementById('state').innerHTML=`
+    <div class="kv"><b>Thread:</b> ${d.thread_id||'-'}</div>
+    <div class="kv"><b>类型:</b> ${d.request_type} <b>金额:</b> ¥${(d.amount||0).toLocaleString()}</div>
+    <div class="kv"><b>部门:</b> ${d.department||'-'}</div>
+    <div class="kv"><b>阶段:</b> ${d.current_phase} <b>风险:</b> ${riskPill(d.risk_level)} <b>审批:</b> ${apprPill(d.approval_status)}</div>
+    <div class="kv"><b>执行:</b> ${d.execution_result||'-'} <b>重试:</b> ${d.retry_count||0}</div>`;
+  document.getElementById('logs').innerHTML=(d.logs||[]).map(l=>`<div>${l}</div>`).join('');
+  document.getElementById('reports').textContent=
+    `【分析报告】\n${d.analysis_report||'-'}\n\n【知识库检索】\n${d.knowledge_context||'-'}\n\n【最终报告】\n${d.final_report||'-'}`;
+  renderNodes(d);
+  const need=(d.paused && (d.current_phase==='approve'||d.approval_status==='pending'));
+  document.getElementById('apprArea').classList.toggle('hide',!need);
+}
+function renderNodes(d){
+  const phase=d.current_phase;
+  const map=[['START','🎬','开始'],['analyst','🔍','分析'],['approval_gate','✋','审批'],
+    ['executor','⚙️','执行'],['monitor','📊','监控'],['END','🏁','结束']];
+  document.getElementById('nodes').innerHTML=map.map(([id,ic,name])=>{
+    let cls='mut',st='⚪';
+    if(id==='analyst'&&['approve','execute','done'].includes(phase)){cls='ok';st='✅';}
+    else if(id==='approval_gate'&&['execute','done'].includes(phase)){cls='ok';st='✅';}
+    else if(id==='approval_gate'&&phase==='approve'){cls='warn';st='⏸️';}
+    else if(id==='executor'&&phase==='done'){cls='ok';st='✅';}
+    else if(id==='monitor'&&phase==='done'){cls='ok';st='✅';}
+    else if(id==='END'&&phase==='done'){cls='ok';st='✅';}
+    else if(id==='START'){cls='ok';st='✅';}
+    return `<div class="node"><span class="ic">${ic}</span><span>${name}</span><span class="st ${cls}">${st}</span></div>`;
+  }).join('');
+}
+document.getElementById('approveBtn').onclick=async()=>{
+  if(!CUR)return; const j=await api('POST',`/approval/decide/${CUR.thread_id}`,{approved:true,comment:comment.value});
+  if(!j)return; if(j.code!==0){toast(j.message);return;} CUR=j.data; renderState(j.data); toast(j.message); refreshPending();
+};
+document.getElementById('rejectBtn').onclick=async()=>{
+  if(!CUR)return; const j=await api('POST',`/approval/decide/${CUR.thread_id}`,{approved:false,comment:comment.value});
+  if(!j)return; if(j.code!==0){toast(j.message);return;} CUR=j.data; renderState(j.data); toast(j.message); refreshPending();
+};
+async function refreshPending(){
+  const j=await api('GET','/workflow/pending');
+  if(!j)return; const items=j.data.items||[];
+  document.getElementById('pending').innerHTML=items.length?items.map(i=>
+    `<div class="kv">${i.thread_id} | ${riskPill(i.risk_level)} | ¥${(i.amount||0).toLocaleString()} | ${i.request_detail?.slice(0,20)}</div>`).join(''):'无';
+}
+document.getElementById('refreshPending').onclick=refreshPending;
+async function refreshMetrics(){
+  const j=await api('GET','/metrics'); if(!j)return; const m=j.data;
+  document.getElementById('metrics').innerHTML=
+    `事件总数:${m.total_events} ｜ 完成(成功):${m.workflow_done_success} ｜ 失败:${m.workflow_done_failed} ｜ 待审批:${m.approval_paused} ｜ 知识块:${m.knowledge_chunks}`;
+}
+document.getElementById('refreshMetrics').onclick=refreshMetrics;
+document.getElementById('auditBtn').onclick=async()=>{
+  const q=document.getElementById('aq').value.trim();
+  const j=await api('GET','/audit/logs'+(q?`?thread_id=${encodeURIComponent(q)}`:''));
+  if(!j)return; const items=j.data.items||[];
+  document.getElementById('auditOut').innerHTML=items.slice(0,50).map(r=>
+    `<div>[${r.created_at}] ${r.event_type} | ${r.actor}(${r.actor_role}) ${r.detail||''}</div>`).join('')||'无';
+};
+document.getElementById('auditExport').onclick=async()=>{
+  const q=document.getElementById('aq').value.trim();
+  window.open(A('/audit/export?format=csv'+(q?`&thread_id=${encodeURIComponent(q)}`:'')));
+};
+</script>
+</body>
+</html>

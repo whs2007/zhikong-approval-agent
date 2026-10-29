@@ -1,0 +1,30 @@
+# 「智控」单实例部署（声明与实现一致）
+#
+# 说明（对应评审 P0-1）：
+# - 本编排的 Checkpointer 与 auth/audit 业务库均为 SQLite，挂载 ./data 持久化，
+#   单实例下重启/跨天可恢复。
+# - 固定单副本（deploy.replicas: 1）。SQLite 无法安全支撑多副本并发写：
+#   若直接横向扩容，各副本会各写各的本地文件，导致状态不一致、并发丢失。
+# - 如需水平扩展（多副本/高可用），必须先把 Checkpointer 与 auth/audit 库一并迁移
+#   到 PostgreSQL，并设置 CHECKPOINTER=postgres + POSTGRES_URL（见 docs/03）。
+services:
+  zhikong:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=prod
+      # 生产强制密钥：未设置则 compose 直接报错（防止用默认弱密钥上线）
+      - SECRET_KEY=${SECRET_KEY:?必须设置 SECRET_KEY，生成方式: openssl rand -hex 32}
+      # 单实例 SQLite 持久化
+      - CHECKPOINTER=sqlite
+      - CHECKPOINTER_DB=/app/data/checkpoints.db
+      - DB_URL=sqlite:////app/data/zhikong.db
+      - AUDIT_DB=/app/data/audit.db
+      - LLM_PROVIDER=${LLM_PROVIDER:-rule}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
+    volumes:
+      - ./data:/app/data
+    deploy:
+      replicas: 1
+    restart: unless-stopped

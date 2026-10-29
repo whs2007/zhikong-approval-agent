@@ -1,0 +1,100 @@
+# 「智控」企业级智能工作流平台
+
+> 基于 **LangGraph 多 Agent 协作 + RAG 知识引擎 + Human-in-the-Loop 审批 + 图级别循环重试 + 全链路审计** 的企业级智能工作流平台。
+>
+> 本项目由简历中的教学版（教材《第 11 章 · 项目五》）按 **分析 → 技术/需求文档 → 企业级开发 → 过程审计** 的顺序升级而来。
+
+---
+
+## 一、为什么做这次升级
+
+教材原版是"能跑通机制的最小示例"，存在生产级缺口。本项目将其升级为企业级：
+
+| 维度 | 教材教学版 | 本企业版 |
+|------|-----------|----------|
+| 知识引擎 | 关键词匹配 | 真实向量 RAG（可离线 n-gram Embedding，可切换大模型） |
+| 状态持久化 | `MemorySaver`（重启即丢） | `SqliteSaver` 文件持久化（支持跨天/重启恢复） |
+| 审计 | 无 | 独立 append-only 审计子系统（全链路留痕、可导出） |
+| 认证授权 | 无 | JWT + RBAC（申请人/审批人/管理员） |
+| 架构 | 单文件拼装 | 分层架构（core / services / workflows / api / schemas / models） |
+| 可观测 | `print` | 结构化 JSON 日志 + 健康检查 + 指标 |
+| 部署 | `python main.py` | Docker / docker-compose |
+
+---
+
+## 二、目录结构
+
+```
+.
+├── docs/                      # 技术文档（分析/设计/审计/计划/部署/过程审计）
+│   ├── 01-需求分析说明书.md
+│   ├── 02-系统架构设计.md
+│   ├── 03-数据库与持久化设计.md
+│   ├── 04-API接口设计.md
+│   ├── 05-审计与安全设计.md
+│   ├── 06-开发计划与里程碑.md
+│   ├── 07-测试方案与验收.md
+│   ├── 08-部署与运维.md
+│   └── 09-过程审计报告.md
+└── zhikong/                   # 企业级源码
+    ├── core/                  # 配置 / 安全(JWT) / 日志
+    ├── services/              # 审计 / 鉴权 / 知识引擎 / 工作流服务
+    ├── workflows/             # 状态 / 可插拔 Provider / 节点 / 图编排
+    ├── api/                   # 路由 / 依赖注入 / 应用装配
+    ├── schemas/               # Pydantic 数据契约
+    ├── models/                # 用户/审计模型（schema 文档）
+    ├── frontend/index.html    # 审批看板（原生 SPA，无构建）
+    ├── data/knowledge/        # 企业规章制度（RAG 语料）
+    ├── tests/                 # pytest 用例
+    ├── requirements.txt  .env.example  Dockerfile  docker-compose.yml
+    └── README.md
+```
+
+---
+
+## 三、快速开始
+
+```bash
+cd zhikong
+pip install -r requirements.txt
+# 默认离线配置即可运行（本地 Embedding + 规则兜底 + SQLite 持久化）
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+- 前端看板：`http://localhost:8000/`
+- API 文档：`http://localhost:8000/docs`
+- 默认账号：`admin/admin123`（管理员）、`approver01/approver123`（审批人）、`applicant01/applicant123`（申请人）
+
+> 未配置任何外部 API Key 也能完整跑通演示（RAG 用本地 n-gram 向量检索，分析用规则兜底）。配置 `LLM_PROVIDER=openai/dashscope`、`EMBEDDING_PROVIDER=st` 即可切换为真实大模型，业务代码零改动。
+
+---
+
+## 四、核心能力验证（已通过 12 项 pytest）
+
+- ✅ 低风险申请自动执行（无人工干预）
+- ✅ 高风险申请暂停 → 审批人批准 → 自动恢复执行
+- ✅ 审批驳回 → 流程结束、不执行
+- ✅ 图级别循环重试（每次失败有快照与日志，第 3 次强制成功）
+- ✅ 跨重启/跨天恢复（同一 checkpoint 文件新建实例仍可恢复）
+- ✅ 全链路审计留痕（提交/风险/暂停/决策/执行/完成 + 登录）
+- ✅ 鉴权（无 token→401，越权→403，审计仅管理员可见）
+
+---
+
+## 五、关键技术决策（ADR 摘要）
+
+1. **可插拔 Provider，默认离线**：LLM/Embedding/向量库均为接口化，默认零依赖离线运行。
+2. **持久化替代内存**：`SqliteSaver` 替代 `MemorySaver`，满足跨天/重启恢复。
+3. **条件中断替代全局中断**：用 `langgraph.types.interrupt` 仅在审批闸门暂停，避免重试循环被误暂停。
+4. **独立审计子系统**：append-only 审计库，与业务/Checkpointer 物理分离，可导出。
+
+详见 `docs/` 各技术文档与 `docs/09-过程审计报告.md`。
+
+---
+
+## 六、交付物清单
+
+- 技术文档 9 份（`docs/`）
+- 企业级源码 1 套（`zhikong/`），含测试 12 项全绿
+- 容器化与部署配置（Dockerfile / docker-compose.yml / .env.example）
+- 过程审计报告（含审计检查点与埋点对照表）
