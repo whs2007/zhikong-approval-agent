@@ -90,6 +90,12 @@ BREAKER_OPEN = Gauge(
     registry=REGISTRY,
 )
 
+OVERDUE_APPROVALS = Gauge(
+    "zhikong_overdue_approvals",
+    "已超过审批时限仍未处理的工作流数（超时积压告警）",
+    registry=REGISTRY,
+)
+
 PENDING_APPROVALS = Gauge(
     "zhikong_pending_approvals",
     "当前等待人工审批的工作流数（用于审批积压告警）",
@@ -193,6 +199,10 @@ def record_tool_call(tool: str, outcome: str, duration_seconds: float = 0.0) -> 
 
 def set_breaker_open(is_open: bool) -> None:
     BREAKER_OPEN.set(1 if is_open else 0)
+
+
+def set_overdue_approvals(count: int) -> None:
+    OVERDUE_APPROVALS.set(max(0, int(count)))
 
 
 def set_pending_approvals(count: int) -> None:

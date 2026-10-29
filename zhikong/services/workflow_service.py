@@ -9,17 +9,25 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from datetime import datetime
 
 from langgraph.types import Command
 
+from core.config import settings
 from core.logging import bind_trace, get_trace_id, reset_trace
 from core.metrics import (
     observe_invoke_duration,
     record_workflow_final,
     record_workflow_submission,
+    set_overdue_approvals,
+    set_pending_approvals,
 )
 from services.audit_service import EventType, append, new_trace_id
 from workflows.graph import build_workflow
+
+# 已写过升级审计的线程（进程内去重，重启后若仍超时会再记一次，可接受：
+# 升级是持续性状态，重复留痕反而便于观察积压时长）
+_ESCALATED_LOGGED: set[str] = set()
 
 
 class WorkflowService:
@@ -91,10 +99,18 @@ class WorkflowService:
         values["next"] = list(snap.next) if snap.next else []
         return values
 
-    def _pending_sync(self) -> list[dict]:
-        """从审计表反查进入审批但未决策（仍在暂停）的线程。"""
+    def _pending_sync(self, now: datetime | None = None) -> list[dict]:
+        """从审计表反查进入审批但未决策（仍在暂停）的线程，并计算审批时效。
+
+        P1-7：消费此前闲置的 APPROVAL_TIMEOUT_HOURS / APPROVAL_ESCALATE_HOURS：
+        - `waiting_hours`：进入审批闸门至今的等待时长
+        - `overdue`：超过审批时限（默认 24h）
+        - `escalated`：超过升级时限（默认 72h），首次判定升级时补一条审计，
+          便于事后追溯"谁拖了多久"，也让运营能据此配置告警
+        """
         from services.audit_service import query as audit_query
         rows = audit_query(event_type=EventType.APPROVAL_PAUSED, size=200)["items"]
+        now = now or datetime.now()
         out: list[dict] = []
         seen: set[str] = set()
         for r in rows:
@@ -103,8 +119,21 @@ class WorkflowService:
                 continue
             seen.add(tid)
             st = self._status_sync(tid)
-            if st and st.get("paused"):
-                out.append(st)
+            if not st or not st.get("paused"):
+                continue
+            st.update(_aging_info(r.get("created_at"), now))
+            if st["escalated"] and tid not in _ESCALATED_LOGGED:
+                _ESCALATED_LOGGED.add(tid)
+                append(EventType.APPROVAL_ESCALATED, actor="system", actor_role="system",
+                       thread_id=tid, trace_id=st.get("trace_id"), node="approval_gate",
+                       level="WARN",
+                       detail={"waiting_hours": st["waiting_hours"],
+                               "threshold_hours": settings.APPROVAL_ESCALATE_HOURS,
+                               "amount": st.get("amount")})
+            out.append(st)
+        # 指标：待审批总数与超时积压数
+        set_pending_approvals(len(out))
+        set_overdue_approvals(sum(1 for s in out if s["overdue"]))
         return out
 
     # ----------------------- 异步包装 -----------------------
@@ -131,6 +160,22 @@ class WorkflowService:
 
 
 # ----------------------------- 工具 -----------------------------
+
+
+def _aging_info(paused_at: str | None, now: datetime) -> dict:
+    """由"进入审批的时间"计算等待时长与超时/升级标记（P1-7）。"""
+    if not paused_at:
+        return {"waiting_hours": None, "overdue": False, "escalated": False}
+    try:
+        started = datetime.fromisoformat(paused_at)
+    except (TypeError, ValueError):
+        return {"waiting_hours": None, "overdue": False, "escalated": False}
+    hours = max(0.0, (now - started).total_seconds() / 3600.0)
+    return {
+        "waiting_hours": round(hours, 2),
+        "overdue": hours > settings.APPROVAL_TIMEOUT_HOURS,
+        "escalated": hours > settings.APPROVAL_ESCALATE_HOURS,
+    }
 
 def _final_result(values: dict, paused: bool) -> str:
     """由工作流最终状态推导终态标签（供 Prometheus 统计成功率）。"""

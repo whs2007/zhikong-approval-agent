@@ -55,6 +55,10 @@ class StatusResponse(BaseModel):
     trace_id: str | None = None
     idempotency_key: str | None = None
     paused: bool = False
+    # P1-7：审批时效（基于进入审批闸门的时间计算）
+    waiting_hours: float | None = None
+    overdue: bool = False            # 超过 APPROVAL_TIMEOUT_HOURS
+    escalated: bool = False          # 超过 APPROVAL_ESCALATE_HOURS（需升级处理）
 
 
 class PendingItem(StatusResponse):

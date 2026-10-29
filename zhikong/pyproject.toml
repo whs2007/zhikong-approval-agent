@@ -47,7 +47,9 @@ ignore = [
 # 模块级 global 持有 SQLite/向量库单例连接，属刻意设计
 "services/*.py" = ["PLW0603"]
 # 测试：conftest 需先设环境变量再 import 业务模块（E402）；允许未使用导入
-"tests/*.py" = ["E402", "F401", "F811"]
+# DTZ001：业务时间戳目前是本地 naive 时间（P2 待办：统一 UTC），
+# 测试构造时间必须与其同口径，否则等待时长会算错。
+"tests/*.py" = ["E402", "F401", "F811", "DTZ001"]
 
 [tool.mypy]
 python_version = "3.11"
