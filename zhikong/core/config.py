@@ -83,6 +83,10 @@ class Settings:
     # 向量检索
     TOP_K: int = _env_int("TOP_K", 3)
     EMBED_DIM: int = _env_int("EMBED_DIM", 256)
+    # 混合检索：词项覆盖率打分所占权重（0=纯向量，1=纯关键词）
+    HYBRID_LEXICAL_WEIGHT: float = _env_float("HYBRID_LEXICAL_WEIGHT", 0.5)
+    # 最小相关度阈值：低于此值不返回片段，避免无关查询硬凑上下文导致幻觉
+    RELEVANCE_MIN_SCORE: float = _env_float("RELEVANCE_MIN_SCORE", 0.12)
 
     # ---- 工作流阈值 ----
     AUTO_APPROVE_THRESHOLD: float = _env_int("AUTO_APPROVE_THRESHOLD", 5000)

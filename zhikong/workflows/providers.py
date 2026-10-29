@@ -126,6 +126,30 @@ class VectorStore(ABC):
     def search(self, query: str, top_k: int, embedder: EmbeddingProvider) -> list[dict]: ...
 
 
+def _normalize(vec: np.ndarray) -> np.ndarray:
+    """把分数向量线性归一到 [0,1]，便于与另一路分数融合。"""
+    lo = float(np.min(vec))
+    hi = float(np.max(vec))
+    if hi - lo < 1e-9:
+        return np.zeros_like(vec)
+    return (vec - lo) / (hi - lo)
+
+
+def _terms(text: str) -> set[str]:
+    """切词：英文/数字按词，中文按字符 bigram（兼顾"30 台"这类数量词）。
+
+    不用 `\\w+` 而显式限定字符类：避免把中文也整段吞掉，保证 bigram 生效。
+    """
+    terms: set[str] = set(re.findall(r"[A-Za-z0-9%]+", text.lower()))
+    han = re.findall(r"[\u4e00-\u9fff]+", text)
+    for seg in han:
+        if len(seg) == 1:
+            terms.add(seg)
+        for i in range(len(seg) - 1):
+            terms.add(seg[i:i + 2])
+    return terms
+
+
 class NumpyVectorStore(VectorStore):
     """内存向量库 + Numpy 余弦检索（默认，零依赖）。"""
 
@@ -145,18 +169,55 @@ class NumpyVectorStore(VectorStore):
             self.matrix = embedder.embed(self.texts)
 
     def search(self, query: str, top_k: int, embedder: EmbeddingProvider) -> list[dict]:
+        """混合检索：向量余弦 + 词项覆盖率加权融合（hybrid retrieval）。
+
+        纯字符 n-gram 向量对"关键词精确匹配"不敏感（例如"30 台"这类数量词），
+        会导致语义相近但条款错误的片段排到 top-1；因此叠加一层词项覆盖率打分。
+        同时施加最小相关度阈值：低于阈值的片段**不返回**，避免无关查询也被
+        硬凑出"上下文"，从源头减少幻觉式召回（见 evals/cases.jsonl 的负例）。
+        """
         if not self.texts:
             return []
         self._ensure_matrix(embedder)
         q = embedder.embed_one(query)
         sims = self.matrix @ q
-        idx = np.argsort(-sims)[:top_k]
+
+        lex = self._lexical_scores(query)
+
+        # 排序分：两路量纲不同（余弦 vs 覆盖率），各自归一化后融合
+        if lex is not None:
+            alpha = settings.HYBRID_LEXICAL_WEIGHT
+            fused = (1 - alpha) * _normalize(sims) + alpha * _normalize(lex)
+        else:
+            fused = sims
+
+        # 相关度门槛必须用**绝对量纲**：归一化是相对本次查询做的，
+        # 若拿融合后的相对分当门槛，top-1 恒为 1.0，门槛形同虚设。
+        # 这里用词项覆盖率（查询词有多少比例出现在片段中）作为绝对判据。
+        abs_scores = lex if lex is not None else sims
+
+        idx = np.argsort(-fused)[:top_k]
         results = []
         for i in idx:
-            if sims[i] <= 0:
+            if abs_scores[i] < settings.RELEVANCE_MIN_SCORE:
                 continue
-            results.append({**self.meta[i], "content": self.texts[i], "score": float(sims[i])})
+            results.append({**self.meta[i], "content": self.texts[i], "score": float(fused[i])})
         return results
+
+    def _lexical_scores(self, query: str) -> np.ndarray | None:
+        """词项覆盖率打分（BM25 的轻量替身）：查询词在文档中出现的比例。
+
+        中文无空格，按字符 bigram 切词；英文/数字按词切分。
+        """
+        q_terms = _terms(query)
+        if not q_terms:
+            return None
+        scores = np.zeros(len(self.texts), dtype=np.float32)
+        for i, text in enumerate(self.texts):
+            d_terms = _terms(text)
+            hit = sum(1 for t in q_terms if t in d_terms)
+            scores[i] = hit / len(q_terms) if q_terms else 0.0
+        return scores
 
 
 def build_vector_store() -> VectorStore:

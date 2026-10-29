@@ -44,6 +44,9 @@ jobs:
       - name: 测试（pytest）
         run: pytest
 
+      - name: 离线评测（风险分级/注入鲁棒性/检索召回，阈值 90%）
+        run: python scripts/run_eval.py --threshold 0.9
+
       - name: 依赖锁一致性
         run: python scripts/gen_lock.py --check
 
