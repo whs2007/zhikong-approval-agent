@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from api.routers import approval, audit, auth, system, workflow
 from core.config import BASE_DIR, settings
 from core.logging import logger
+from core.tracing import TraceIdMiddleware
 from services import knowledge_service as ks
 
 FRONTEND = BASE_DIR / "frontend" / "index.html"
@@ -48,6 +49,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# P1-2：后添加=更外层，确保覆盖包括 CORS 在内的全部请求路径
+app.add_middleware(TraceIdMiddleware)
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(workflow.router, prefix="/api/v1")

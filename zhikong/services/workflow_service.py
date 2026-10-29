@@ -13,7 +13,7 @@ from typing import Any, Optional
 from langgraph.types import Command
 
 from core.config import settings
-from core.logging import logger
+from core.logging import bind_trace, get_trace_id, logger, reset_trace
 from services.audit_service import EventType, append, new_trace_id
 from workflows.graph import build_workflow
 
@@ -27,37 +27,50 @@ class WorkflowService:
     def _submit_sync(self, state: dict, actor: str, actor_role: str) -> dict:
         thread_id = state["thread_id"]
         config = {"configurable": {"thread_id": thread_id}}
-        append(EventType.WORKFLOW_SUBMIT, actor=actor, actor_role=actor_role,
-               thread_id=thread_id, trace_id=state.get("trace_id"),
-               detail={"request_type": state["request_type"], "amount": state["amount"],
-                       "department": state.get("department")})
-        result = self.app.invoke(state, config)
-        snap = self.app.get_state(config)
-        paused = bool(snap.next)
-        if paused:
-            # 进入人工审批闸门，登记暂停审计
-            append(EventType.APPROVAL_PAUSED, actor="system", actor_role="system",
+        # P1-2：把链路 ID 绑定到当前上下文（to_thread 会传播 contextvars），
+        # 使 analyst/executor/monitor 等节点的日志自动携带 trace_id，无需手动拼接。
+        tokens = bind_trace(trace_id=state.get("trace_id", ""), thread_id=thread_id)
+        try:
+            append(EventType.WORKFLOW_SUBMIT, actor=actor, actor_role=actor_role,
                    thread_id=thread_id, trace_id=state.get("trace_id"),
-                   node="approval_gate",
-                   detail={"risk_level": result.get("risk_level"),
-                           "amount": state.get("amount")})
-        return {"state": _public_state(result), "paused": paused,
-                "next": list(snap.next) if snap.next else []}
+                   detail={"request_type": state["request_type"], "amount": state["amount"],
+                           "department": state.get("department")})
+            result = self.app.invoke(state, config)
+            snap = self.app.get_state(config)
+            paused = bool(snap.next)
+            if paused:
+                # 进入人工审批闸门，登记暂停审计
+                append(EventType.APPROVAL_PAUSED, actor="system", actor_role="system",
+                       thread_id=thread_id, trace_id=state.get("trace_id"),
+                       node="approval_gate",
+                       detail={"risk_level": result.get("risk_level"),
+                               "amount": state.get("amount")})
+            return {"state": _public_state(result), "paused": paused,
+                    "next": list(snap.next) if snap.next else []}
+        finally:
+            reset_trace(*tokens)
 
     def _decide_sync(self, thread_id: str, approved: bool, comment: str,
                      actor: str, actor_role: str) -> dict:
         config = {"configurable": {"thread_id": thread_id}}
-        # 用 Command(resume=...) 将审批结论传入 interrupt() 恢复执行
-        result = self.app.invoke(
-            Command(resume={"approved": approved, "comment": comment,
-                            "actor": actor, "actor_role": actor_role}),
-            config,
-        )
-        append(EventType.APPROVAL_DECISION, actor=actor, actor_role=actor_role,
-               thread_id=thread_id,
-               detail={"decision": "approved" if approved else "rejected",
-                       "comment": comment})
-        return _public_state(result)
+        # P1-2：恢复审批时同样绑定链路（trace_id 从现有 checkpoint 状态取回）
+        snapshot = self.app.get_state(config)
+        trace_id = (snapshot.values or {}).get("trace_id", "") if snapshot else ""
+        tokens = bind_trace(trace_id=trace_id, thread_id=thread_id)
+        try:
+            # 用 Command(resume=...) 将审批结论传入 interrupt() 恢复执行
+            result = self.app.invoke(
+                Command(resume={"approved": approved, "comment": comment,
+                                "actor": actor, "actor_role": actor_role}),
+                config,
+            )
+            append(EventType.APPROVAL_DECISION, actor=actor, actor_role=actor_role,
+                   thread_id=thread_id, trace_id=trace_id,
+                   detail={"decision": "approved" if approved else "rejected",
+                           "comment": comment})
+            return _public_state(result)
+        finally:
+            reset_trace(*tokens)
 
     def _status_sync(self, thread_id: str) -> Optional[dict]:
         config = {"configurable": {"thread_id": thread_id}}
@@ -89,7 +102,10 @@ class WorkflowService:
 
     async def submit(self, request: dict, actor: str, actor_role: str) -> dict:
         thread_id = request.get("thread_id") or f"WF-{uuid.uuid4().hex[:12]}"
-        trace_id = new_trace_id()
+        # P1-2：优先继承当前 HTTP 链路的 trace_id（中间件生成并绑定），缺失时才新建。
+        # 这样「HTTP 响应头 X-Trace-Id → 节点日志 → 审计表」三者是同一个 id，
+        # 真正做到一次请求一条链路可串联查询，而不是各层自造 id。
+        trace_id = get_trace_id() or new_trace_id()
         state = _initial_state(request, thread_id, trace_id)
         return await asyncio.to_thread(self._submit_sync, state, actor, actor_role)
 
