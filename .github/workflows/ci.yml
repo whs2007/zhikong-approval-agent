@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+# 后端代码位于仓库的 zhikong/ 子目录；gitleaks 仍扫描整个仓库（含 docs）
+defaults:
+  run:
+    working-directory: zhikong
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: 质量门禁（ruff / mypy / pytest）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖（锁定版本，保证与生产一致）
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint（ruff）
+        run: ruff check .
+
+      - name: 类型检查（mypy）
+        run: mypy .
+
+      - name: 测试（pytest）
+        run: pytest
+
+      - name: 依赖锁一致性
+        run: python scripts/gen_lock.py --check
+
+  security:
+    name: 安全门禁（依赖漏洞 / 秘密扫描）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks 需要完整历史才能扫描"已删除但曾出现"的秘密
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依赖漏洞审计（pip-audit）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip-audit -r requirements.txt
+
+      - name: 秘密扫描（gitleaks）
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 组织/私有仓库需配置 GITLEAKS_LICENSE secret；若暂无许可可先改为
+          # continue-on-error: true 以免阻塞流水线（但不建议长期关闭）。

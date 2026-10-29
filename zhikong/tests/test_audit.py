@@ -37,9 +37,11 @@ def test_audit_export_csv(client, admin_token):
 
 def test_persistence_across_restart(client, applicant_token, approver_token):
     """模拟服务重启：用同一 checkpoint 文件新建工作流实例，应能从暂停处恢复。"""
-    from workflows.graph import build_workflow
-    from langgraph.checkpoint.sqlite import SqliteSaver
     import sqlite3
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    from workflows.graph import build_workflow
 
     tid = _submit_high(client, applicant_token)  # 暂停在审批闸门
 

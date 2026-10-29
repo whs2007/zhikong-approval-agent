@@ -9,7 +9,6 @@ sys.path.insert(0, ".")
 
 from core.config import settings
 
-
 # ----------------------- P0-1：Checkpointer 显式化 -----------------------
 
 def test_unknown_checkpointer_raises(monkeypatch):
@@ -24,7 +23,7 @@ def test_postgres_without_driver_raises(monkeypatch):
     monkeypatch.setattr(settings, "CHECKPOINTER", "postgres")
     monkeypatch.setattr(settings, "POSTGRES_URL", "postgresql://u:p@localhost:5432/db")
     try:
-        import langgraph.checkpoint.postgres  # noqa: F401
+        import langgraph.checkpoint.postgres
         pytest.skip("postgres 驱动已安装，该路径需真实数据库，跳过")
     except ImportError:
         pass

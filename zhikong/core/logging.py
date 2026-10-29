@@ -17,7 +17,7 @@ import json
 import logging
 import sys
 import uuid
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from datetime import datetime
 
 # 链路 ID 的请求头约定：入站透传优先，出站回写以便网关/客户端对齐
@@ -33,7 +33,7 @@ def new_trace_id() -> str:
 
 def bind_trace(
     *, trace_id: str | None = None, thread_id: str | None = None
-) -> tuple[object | None, object | None]:
+) -> tuple[Token[str] | None, Token[str] | None]:
     """把 trace_id / thread_id 绑定到当前上下文，返回用于精确还原的 token。
 
     只绑定显式传入的项（传 None 表示不动该项）。请求结束务必调用 `reset_trace()`
@@ -48,7 +48,7 @@ def bind_trace(
     return tid_token, th_token
 
 
-def reset_trace(tid_token: object | None = None, th_token: object | None = None) -> None:
+def reset_trace(tid_token: Token[str] | None = None, th_token: Token[str] | None = None) -> None:
     """用 `bind_trace` 返回的 token 精确还原上下文。"""
     if tid_token is not None:
         _trace_id_var.reset(tid_token)
@@ -103,9 +103,9 @@ def get_logger(name: str = "zhikong") -> logging.Logger:
         handler.setFormatter(JsonFormatter())
         logger.addHandler(handler)
     # 幂等地为每个 handler 装配链路 Filter（重复调用 get_logger 也不丢失）
-    for handler in logger.handlers:
-        if not any(isinstance(f, TraceContextFilter) for f in handler.filters):
-            handler.addFilter(TraceContextFilter())
+    for h in logger.handlers:
+        if not any(isinstance(f, TraceContextFilter) for f in h.filters):
+            h.addFilter(TraceContextFilter())
     logger.setLevel(logging.INFO)
     logger.propagate = False
     return logger

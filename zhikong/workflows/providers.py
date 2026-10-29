@@ -7,18 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 
 from core.config import settings
 from core.logging import logger
-
 
 # ----------------------------- 风险下限 -----------------------------
 
@@ -60,7 +57,7 @@ class LocalEmbedding(EmbeddingProvider):
 
     def _ngrams(self, text: str) -> list[str]:
         text = re.sub(r"\s+", "", text.lower())
-        grams = [c for c in text]
+        grams = list(text)
         grams += [text[i:i + 2] for i in range(len(text) - 1)]
         return grams
 

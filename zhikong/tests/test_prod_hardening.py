@@ -15,7 +15,6 @@ sys.path.insert(0, ".")
 from core.config import Settings
 from services import auth_service as au
 
-
 # ----------------------- 1) 生产密钥合规自检 -----------------------
 
 def test_no_hardcoded_default_secret():
@@ -65,9 +64,11 @@ def test_dev_skips_validation_without_key():
 
 def test_is_production_variants():
     assert Settings().is_production() is False
-    s = Settings(); s.ENV = "production"
+    s = Settings()
+    s.ENV = "production"
     assert s.is_production() is True
-    s2 = Settings(); s2.ENV = "PROD"
+    s2 = Settings()
+    s2.ENV = "PROD"
     assert s2.is_production() is True
 
 
@@ -149,6 +150,7 @@ def test_init_admin_bootstrap_then_locked(monkeypatch, tmp_path):
     """零用户时开放引导；已有用户后未带管理员令牌必须 403。"""
     _point_auth_to(tmp_path, monkeypatch, env="prod")  # 生产：默认不种子
     from fastapi.testclient import TestClient
+
     from api.main import app
 
     with TestClient(app) as c:
@@ -180,6 +182,7 @@ def test_init_admin_rejects_weak_passwords(monkeypatch, tmp_path):
     """反例（缺口①）：常见词/纯数字/纯字母/过短/低多样性口令必须 400 拒绝且不落库。"""
     _point_auth_to(tmp_path, monkeypatch, env="prod")  # 0 用户，避免 403 干扰
     from fastapi.testclient import TestClient
+
     from api.main import app
 
     weak = [
@@ -202,6 +205,7 @@ def test_init_admin_accepts_strong_password(monkeypatch, tmp_path):
     """正例（缺口①）：强口令可正常创建管理员。"""
     _point_auth_to(tmp_path, monkeypatch, env="prod")
     from fastapi.testclient import TestClient
+
     from api.main import app
 
     with TestClient(app) as c:

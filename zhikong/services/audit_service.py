@@ -15,7 +15,7 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from core.config import settings
 from core.logging import logger
@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor);
 """
 
 _lock = threading.Lock()
-_conn: Optional[sqlite3.Connection] = None
+_conn: sqlite3.Connection | None = None
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -123,7 +123,7 @@ def append(
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
-    return {k: row[k] for k in row.keys()}
+    return dict(row)
 
 
 def query(
@@ -136,23 +136,29 @@ def query(
     page: int = 1,
     size: int = 50,
 ) -> dict:
-    conds, params = [], []
+    conds: list[str] = []
+    params: list[Any] = []
     if thread_id:
-        conds.append("thread_id = ?"); params.append(thread_id)
+        conds.append("thread_id = ?")
+        params.append(thread_id)
     if actor:
-        conds.append("actor = ?"); params.append(actor)
+        conds.append("actor = ?")
+        params.append(actor)
     if event_type:
-        conds.append("event_type = ?"); params.append(event_type)
+        conds.append("event_type = ?")
+        params.append(event_type)
     if start:
-        conds.append("created_at >= ?"); params.append(start)
+        conds.append("created_at >= ?")
+        params.append(start)
     if end:
-        conds.append("created_at <= ?"); params.append(end)
+        conds.append("created_at <= ?")
+        params.append(end)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     con = _get_conn()
     total = con.execute(f"SELECT COUNT(*) FROM audit_log {where}", params).fetchone()[0]
     rows = con.execute(
         f"SELECT * FROM audit_log {where} ORDER BY id DESC LIMIT ? OFFSET ?",
-        params + [size, max(0, (page - 1) * size)],
+        [*params, size, max(0, (page - 1) * size)],
     ).fetchall()
     return {"items": [_row_to_dict(r) for r in rows], "total": total}
 

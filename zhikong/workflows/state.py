@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Optional, TypedDict
+from typing import Annotated, TypedDict
 
 
 class WorkflowState(TypedDict, total=False):
@@ -17,7 +17,7 @@ class WorkflowState(TypedDict, total=False):
     risk_level: str           # low / medium / high
     approval_status: str      # pending / approved / rejected
     retry_count: int
-    error: Optional[str]
+    error: str | None
     trace_id: str
     # 幂等键：同一请求重复提交/重试时，保证副作用只发生一次
     idempotency_key: str

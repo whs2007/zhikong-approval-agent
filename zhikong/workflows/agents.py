@@ -8,9 +8,8 @@
 """
 from __future__ import annotations
 
-import random
 import time
-from typing import Optional
+from typing import Any
 
 from langgraph.types import interrupt
 
@@ -25,6 +24,7 @@ from workflows.tools import (
     CircuitBreaker,
     SupplierOrderTool,
     ToolError,
+    ToolErrorKind,
     backoff_delay,
     run_with_resilience,
 )
@@ -51,8 +51,8 @@ def _backoff_delay(retry: int) -> float:
 
 # ----------------------------- 工具与熔断器（P1-1） -----------------------------
 
-_TOOL: Optional[Any] = None
-_BREAKER: Optional[CircuitBreaker] = None
+_TOOL: Any | None = None
+_BREAKER: CircuitBreaker | None = None
 
 
 def _tool() -> Any:
@@ -73,7 +73,7 @@ def _breaker() -> CircuitBreaker:
         )
     return _BREAKER
 
-_LLM: Optional[LLMProvider] = None
+_LLM: LLMProvider | None = None
 
 
 def _llm() -> LLMProvider:
@@ -155,7 +155,6 @@ def approval_gate_node(state: WorkflowState) -> dict:
     首次进入时 interrupt() 暂停；恢复时 interrupt() 返回外部传入的审批结论（dict）。
     """
     tid = state.get("thread_id")
-    trace = state.get("trace_id")
 
     decision = interrupt({
         "type": "approval_required",
@@ -180,7 +179,7 @@ def approval_gate_node(state: WorkflowState) -> dict:
 # ----------------------------- Executor -----------------------------
 
 def executor_node(state: WorkflowState) -> dict:
-    tid = state.get("thread_id")
+    tid = state.get("thread_id") or ""
     trace = state.get("trace_id")
     retry = int(state.get("retry_count", 0))
     idem_key = state.get("idempotency_key") or tid
@@ -249,11 +248,11 @@ def executor_node(state: WorkflowState) -> dict:
         }
     except ToolError as e:
         # 工具层已耗尽重试 / 不可重试 / 熔断开路 -> 终态失败（图级不再自循环重试）
-        kind = getattr(e, "kind", None)
+        kind = e.kind
         append(EventType.EXEC_RESULT, actor="executor", actor_role="system",
                thread_id=tid, trace_id=trace, node="executor", level="ERROR",
                detail={"result": "failed", "error": str(e),
-                       "kind": kind.value if hasattr(kind, "value") else None})
+                       "kind": kind.value if isinstance(kind, ToolErrorKind) else None})
         return {
             "execution_result": "failed",
             "retry_count": retry + 1,

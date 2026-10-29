@@ -8,13 +8,13 @@ from core.logging import logger
 from core.security import ROLE_ADMIN, CredentialError, encode_jwt
 from models.user import User
 from schemas import ApiResponse, LoginRequest, TokenResponse, UserInfo
+from services.audit_service import EventType, append
 from services.auth_service import (
     authenticate,
     create_first_admin_if_absent,
     create_user,
     get_user_count,
 )
-from services.audit_service import EventType, append
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -24,7 +24,8 @@ def _create_admin(username: str, password: str, display_name: str) -> User:
     try:
         return create_user(username, password, ROLE_ADMIN, display_name)
     except CredentialError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        # from None：不把内部异常链带到 HTTP 层，仅暴露校验原因
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
 
 
 @router.post("/login", response_model=ApiResponse)
@@ -63,7 +64,11 @@ def init_admin(
         try:
             created, outcome = create_first_admin_if_absent(username, password, display_name)
         except CredentialError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+        if created is None:
+            # 竞速落败时可能拿不到新建对象；显式 500 优于对 None 取属性
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="管理员创建失败，请重试")
         if outcome == "created":
             append(EventType.ADMIN_BOOTSTRAP, actor=username,
                    detail={"via": "init-admin-bootstrap"})

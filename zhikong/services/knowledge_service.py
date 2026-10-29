@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Optional
 
 from core.config import KNOWLEDGE_DIR, settings
 from core.logging import logger
 from workflows.providers import VectorStore, build_embedding, build_vector_store
 
 _EMBED = None
-_STORE: Optional[VectorStore] = None
+_STORE: VectorStore | None = None
 _DOC_COUNT = 0
 
 
@@ -30,8 +29,8 @@ def _split(text: str, size: int = 500, overlap: int = 50) -> list[str]:
     # 按标题分段优先，再按长度切分
     parts = re.split(r"\n#+\s", text)
     chunks: list[str] = []
-    for part in parts:
-        part = part.strip()
+    for raw in parts:
+        part = raw.strip()
         if not part:
             continue
         if len(part) <= size:
@@ -55,7 +54,7 @@ def build() -> int:
                 continue
             path = os.path.join(root, name)
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     text = f.read().strip()
             except Exception as e:
                 logger.warning(f"[knowledge] 读取失败 {path}: {e}")
@@ -71,14 +70,13 @@ def build() -> int:
 
 
 def _ensure_built() -> VectorStore:
-    global _STORE
     if _STORE is None:
         build()
     assert _STORE is not None
     return _STORE
 
 
-def search(query: str, top_k: int = None) -> str:
+def search(query: str, top_k: int | None = None) -> str:
     """检索相关规则并拼为上下文字符串。"""
     top_k = top_k or settings.TOP_K
     results = _ensure_built().search(query, top_k, _get_embedder())

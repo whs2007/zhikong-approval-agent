@@ -4,8 +4,10 @@
 """
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
+from typing import ClassVar
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -109,7 +111,10 @@ class Settings:
     # 服务
     HOST: str = _env("HOST", "0.0.0.0")
     PORT: int = _env_int("PORT", 8000)
-    CORS_ORIGINS: list[str] = [o.strip() for o in _env("CORS_ORIGINS", "*").split(",") if o.strip()]
+    # ClassVar：该列表为类级共享配置，不参与实例可变状态（ruff RUF012）
+    CORS_ORIGINS: ClassVar[list[str]] = [
+        o.strip() for o in _env("CORS_ORIGINS", "*").split(",") if o.strip()
+    ]
 
     # ----------------------- 环境判定 -----------------------
 
@@ -153,10 +158,8 @@ class Settings:
         generated = secrets.token_urlsafe(48)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(generated, encoding="utf-8")
-        try:
+        with contextlib.suppress(OSError):
             path.chmod(0o600)
-        except OSError:
-            pass
         self.SECRET_KEY = generated
 
     # ----------------------- 生产自检 -----------------------

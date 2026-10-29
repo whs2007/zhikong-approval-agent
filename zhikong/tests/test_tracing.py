@@ -17,7 +17,6 @@ from core.logging import (
     reset_trace,
 )
 
-
 # ----------------------------- 上下文绑定 -----------------------------
 
 def test_bind_and_reset_restores_context():

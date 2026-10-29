@@ -16,7 +16,6 @@ from core.config import settings
 from core.logging import logger
 from core.security import (
     ALL_ROLES,
-    CredentialError,
     ROLE_ADMIN,
     hash_password,
     validate_password_strength,
@@ -108,7 +107,11 @@ def create_user(username: str, password: str, role: str, display_name: str) -> U
             (uid, username, hash_password(password), role, display_name, now),
         )
         cur.commit()
-    return get_by_username(username)
+    created = get_by_username(username)
+    if created is None:
+        # 插入后无法回读说明存在并发删除或库异常，显式失败优于返回 None 让调用方踩空
+        raise RuntimeError(f"用户 {username} 创建后回读失败")
+    return created
 
 
 def create_first_admin_if_absent(

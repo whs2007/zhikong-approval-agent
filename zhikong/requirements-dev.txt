@@ -1,0 +1,6 @@
+# 开发/CI 质量门禁工具（P1-6）：仅在本地开发与 CI 使用，不进生产镜像
+# 生产镜像只需 requirements.txt / requirements.lock.txt
+
+ruff>=0.17
+mypy>=1.19
+pip-audit>=2.10

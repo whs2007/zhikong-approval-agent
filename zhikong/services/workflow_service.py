@@ -9,12 +9,10 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import Any, Optional
 
 from langgraph.types import Command
 
-from core.config import settings
-from core.logging import bind_trace, get_trace_id, logger, reset_trace
+from core.logging import bind_trace, get_trace_id, reset_trace
 from core.metrics import (
     observe_invoke_duration,
     record_workflow_final,
@@ -83,7 +81,7 @@ class WorkflowService:
         finally:
             reset_trace(*tokens)
 
-    def _status_sync(self, thread_id: str) -> Optional[dict]:
+    def _status_sync(self, thread_id: str) -> dict | None:
         config = {"configurable": {"thread_id": thread_id}}
         snap = self.app.get_state(config)
         if snap is None or snap.values is None:
@@ -125,7 +123,7 @@ class WorkflowService:
         return await asyncio.to_thread(
             self._decide_sync, thread_id, approved, comment, actor, actor_role)
 
-    async def status(self, thread_id: str) -> Optional[dict]:
+    async def status(self, thread_id: str) -> dict | None:
         return await asyncio.to_thread(self._status_sync, thread_id)
 
     async def pending(self) -> list[dict]:

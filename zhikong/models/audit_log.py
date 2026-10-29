@@ -1,7 +1,7 @@
 """审计日志模型（append-only）。详见 services/audit_service.py。"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 

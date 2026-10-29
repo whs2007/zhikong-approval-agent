@@ -8,9 +8,8 @@ import base64
 import hashlib
 import hmac
 import json
-import os
-import time
 import secrets
+import time
 from typing import Any
 
 from core.config import settings
@@ -45,7 +44,7 @@ def decode_jwt(token: str) -> dict[str, Any]:
     try:
         seg1, seg2, seg3 = token.split(".")
     except ValueError:
-        raise ValueError("invalid token format")
+        raise ValueError("invalid token format") from None
     signing_input = f"{seg1}.{seg2}".encode("ascii")
     expected = hmac.new(settings.SECRET_KEY.encode(), signing_input, hashlib.sha256).digest()
     got = _b64url_decode(seg3)

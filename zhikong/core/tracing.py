@@ -5,7 +5,8 @@ contextvars 传播与流式响应能力，而链路追踪的正确性依赖上�
 """
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from core.logging import TRACE_ID_HEADER, bind_trace, new_trace_id, reset_trace
 

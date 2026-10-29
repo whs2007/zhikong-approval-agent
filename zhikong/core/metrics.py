@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -108,8 +109,7 @@ def normalize_path(path: str) -> str:
     例：`/api/v1/approval/decide/WF-4f96d403fbc2` -> `/api/v1/approval/decide/{WF}`
     """
     path = _WF_ID_RE.sub("{WF}", path)
-    path = _LONG_ID_RE.sub("{id}", path)
-    return path
+    return _LONG_ID_RE.sub("{id}", path)
 
 
 # ----------------------------- HTTP 中间件 -----------------------------

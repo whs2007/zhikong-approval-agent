@@ -1,0 +1,60 @@
+# 工程化配置（P1-6）：ruff（lint）/ mypy（类型）/ pytest（测试）
+# 说明：本项目后端为纯 Python 包，不使用构建后端，仅用本文件承载工具配置。
+
+[tool.ruff]
+# 120：代码含大量中文注释/日志字符串，100 过窄会催生无意义折行
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".venv",
+    "venv",
+    "data",
+    ".ruff_cache",
+    ".pytest_cache",
+]
+
+[tool.ruff.lint]
+# E/F：pycodestyle + pyflakes（错误与未定义名，必开）
+# W：警告  I：import 排序  UP：pyupgrade  B：bugbear（常见缺陷）
+# C4：推导式  SIM：可简化  RET：return 一致性  RUF：ruff 专有
+# DTZ/PLW：时区与全局变量（本项目 DB 连接单例刻意用 global，已在 per-file-ignores 放行）
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RET", "RUF", "DTZ", "PLW", "BLE"]
+ignore = [
+    # B008：FastAPI 依赖注入惯用法（x: T = Depends(...)），并非真实缺陷
+    "B008",
+    # RUF001/002/003：中文项目大量使用中文标点（「」、——、：），判为"歧义字符"属误报
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # DTZ：时间戳目前为本地时间（P2 待办：统一 UTC，涉及存量数据迁移，不在本轮改动）
+    "DTZ004",
+    "DTZ005",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 以下位置的 `except Exception` 是刻意兜底：把未知异常降级/转译，避免单点故障击穿主流程。
+# 已在代码处标注降级原因，故按文件豁免而非全局关闭 BLE001（全局关闭会掩盖真实缺陷）。
+"workflows/tools.py" = ["BLE001"]
+"workflows/providers.py" = ["BLE001"]
+"workflows/agents.py" = ["BLE001", "PLW0603"]
+"services/audit_service.py" = ["BLE001"]
+"services/knowledge_service.py" = ["BLE001"]
+"api/main.py" = ["BLE001"]
+"api/routers/system.py" = ["BLE001"]
+# 模块级 global 持有 SQLite/向量库单例连接，属刻意设计
+"services/*.py" = ["PLW0603"]
+# 测试：conftest 需先设环境变量再 import 业务模块（E402）；允许未使用导入
+"tests/*.py" = ["E402", "F401", "F811"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = false
+exclude = ["data/", ".venv/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

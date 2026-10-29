@@ -22,30 +22,32 @@ from __future__ import annotations
 
 import random
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, Optional, Protocol
+from enum import StrEnum
+from typing import Protocol
 
 from core.config import settings
 from core.logging import logger
 from core.metrics import record_tool_call, set_breaker_open
 
 __all__ = [
-    "ToolErrorKind",
-    "ToolError",
-    "CircuitBreakerOpen",
     "BreakerState",
     "CircuitBreaker",
-    "Tool",
+    "CircuitBreakerOpen",
     "SupplierOrderTool",
+    "Tool",
+    "ToolError",
+    "ToolErrorKind",
     "backoff_delay",
     "call_with_timeout",
     "run_with_resilience",
 ]
 
 
-class ToolErrorKind(str, Enum):
+class ToolErrorKind(StrEnum):
     """工具错误的语义分类，决定重试策略与观测口径。"""
 
     TIMEOUT = "timeout"      # 超时（可重试）
@@ -79,7 +81,7 @@ class CircuitBreakerOpen(ToolError):
         super().__init__(message, retryable=False, kind=ToolErrorKind.FATAL)
 
 
-class BreakerState(str, Enum):
+class BreakerState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -166,7 +168,7 @@ class SupplierOrderTool:
         self,
         latency_seconds: float = 0.02,
         failure_rate: float | None = None,
-        rng: Optional[Callable[[], float]] = None,
+        rng: Callable[[], float] | None = None,
     ) -> None:
         # failure_rate 未显式传入时跟随 settings.TOOL_FAILURE_RATE
         # （便于不同环境/测试统一调节，测试环境由 conftest 置 0 保证确定性）

@@ -1,7 +1,6 @@
 """FastAPI 应用装配。"""
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request

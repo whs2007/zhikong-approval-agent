@@ -1,7 +1,7 @@
 """审计路由：查询与导出（仅管理员）。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 
 from api.deps import AdminUser

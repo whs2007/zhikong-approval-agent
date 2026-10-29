@@ -10,7 +10,8 @@ from core.logging import logger
 from models.user import User
 from schemas import ApiResponse
 from services import knowledge_service as ks
-from services.audit_service import EventType, append, query as audit_query
+from services.audit_service import EventType, append
+from services.audit_service import query as audit_query
 from services.workflow_service import workflow_service
 
 router = APIRouter(tags=["系统"])
