@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from api.routers import approval, audit, auth, system, workflow
 from core.config import BASE_DIR, settings
 from core.logging import logger
+from core.metrics import MetricsMiddleware
 from core.tracing import TraceIdMiddleware
 from services import knowledge_service as ks
 
@@ -49,6 +50,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# P1-3：HTTP 请求计数与耗时（放在 TraceId 之内侧，两者都在 CORS 外层）
+app.add_middleware(MetricsMiddleware)
 # P1-2：后添加=更外层，确保覆盖包括 CORS 在内的全部请求路径
 app.add_middleware(TraceIdMiddleware)
 

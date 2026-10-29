@@ -1,9 +1,10 @@
 """系统路由：健康检查、指标、知识库重载。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from api.deps import AdminUser, get_current_user
+from core import metrics as metrics_mod
 from core.config import settings
 from core.logging import logger
 from models.user import User
@@ -28,8 +29,26 @@ def health():
                             "checks": checks, "env": settings.ENV})
 
 
-@router.get("/metrics", response_model=ApiResponse)
+@router.get("/metrics")
 def metrics(user: User = Depends(get_current_user)):
+    """Prometheus 抓取端点（P1-3）。
+
+    返回标准 Prometheus 文本格式（不再是审计表全量 COUNT 的 JSON）。
+    保留鉴权：指标可能暴露业务量等敏感运营信息，无鉴权暴露属安全隐患。
+    """
+    # Gauge 类瞬时指标需在拉取时刷新：待审批积压数
+    try:
+        pending = workflow_service._pending_sync()
+        metrics_mod.set_pending_approvals(len(pending))
+    except Exception as e:  # pragma: no cover - 指标降级不应影响告警抓取
+        logger.warning(f"[metrics] 刷新待审批数失败: {e}")
+    body, content_type = metrics_mod.render_metrics()
+    return Response(content=body, media_type=content_type)
+
+
+@router.get("/metrics/summary", response_model=ApiResponse)
+def metrics_summary(user: User = Depends(get_current_user)):
+    """业务概览（JSON）：保留 P1-3 之前的行为，供前端/人工查看。"""
     rows = audit_query(size=100000)["items"]
     total = len(rows)
     success = sum(1 for r in rows if r["event_type"] == EventType.WORKFLOW_DONE

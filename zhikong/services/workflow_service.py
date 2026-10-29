@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from typing import Any, Optional
 
@@ -14,6 +15,11 @@ from langgraph.types import Command
 
 from core.config import settings
 from core.logging import bind_trace, get_trace_id, logger, reset_trace
+from core.metrics import (
+    observe_invoke_duration,
+    record_workflow_final,
+    record_workflow_submission,
+)
 from services.audit_service import EventType, append, new_trace_id
 from workflows.graph import build_workflow
 
@@ -35,9 +41,14 @@ class WorkflowService:
                    thread_id=thread_id, trace_id=state.get("trace_id"),
                    detail={"request_type": state["request_type"], "amount": state["amount"],
                            "department": state.get("department")})
+            started = time.perf_counter()
             result = self.app.invoke(state, config)
+            observe_invoke_duration(time.perf_counter() - started)
             snap = self.app.get_state(config)
             paused = bool(snap.next)
+            # P1-3：按初态与终态埋点，Prometheus 侧可算成功率与待审批比例
+            record_workflow_submission("approve" if paused else "execute")
+            record_workflow_final(_final_result(result, paused))
             if paused:
                 # 进入人工审批闸门，登记暂停审计
                 append(EventType.APPROVAL_PAUSED, actor="system", actor_role="system",
@@ -122,6 +133,19 @@ class WorkflowService:
 
 
 # ----------------------------- 工具 -----------------------------
+
+def _final_result(values: dict, paused: bool) -> str:
+    """由工作流最终状态推导终态标签（供 Prometheus 统计成功率）。"""
+    if paused:
+        return "pending_approval"
+    if values.get("approval_status") == "rejected":
+        return "rejected"
+    if values.get("execution_result") == "success":
+        return "success"
+    if values.get("execution_result") in ("failed", "error"):
+        return "failed"
+    return "unknown"
+
 
 def _initial_state(request: dict, thread_id: str, trace_id: str) -> dict:
     return {

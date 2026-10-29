@@ -29,6 +29,7 @@ from typing import Any, Callable, Optional, Protocol
 
 from core.config import settings
 from core.logging import logger
+from core.metrics import record_tool_call, set_breaker_open
 
 __all__ = [
     "ToolErrorKind",
@@ -210,6 +211,7 @@ def run_with_resilience(
     """
     timeout = timeout if timeout is not None else settings.TOOL_TIMEOUT_SECONDS
     max_retries = max_retries if max_retries is not None else settings.TOOL_MAX_RETRIES
+    tool_name = getattr(tool, "name", "unknown")
     attempts = 0
     last_err: ToolError | None = None
 
@@ -217,7 +219,18 @@ def run_with_resilience(
         attempts += 1
         if breaker is not None:
             # 开路且未过冷却期 -> 直接快速失败，不再打下游
-            breaker.check()
+            try:
+                breaker.check()
+            except CircuitBreakerOpen as e:
+                set_breaker_open(True)
+                record_tool_call(tool_name, "breaker_open")
+                raise e
+            else:
+                set_breaker_open(False)
+        else:
+            set_breaker_open(False)
+
+        started = time.perf_counter()
         try:
             result = call_with_timeout(tool, payload, timeout)
         except CircuitBreakerOpen:
@@ -227,17 +240,22 @@ def run_with_resilience(
         except Exception as e:
             # 非预期异常按致命处理：不重试（避免放大 bug），但保留上下文便于排查
             last_err = ToolError(
-                f"工具 {getattr(tool, 'name', 'unknown')} 内部异常: {e}",
+                f"工具 {tool_name} 内部异常: {e}",
                 retryable=False,
                 kind=ToolErrorKind.FATAL,
             )
         else:
             if breaker is not None:
                 breaker.record_success()
+                set_breaker_open(False)
+            record_tool_call(tool_name, "success", time.perf_counter() - started)
             return result, attempts
 
+        elapsed = time.perf_counter() - started
         if breaker is not None:
             breaker.record_failure()
+            set_breaker_open(breaker.state is BreakerState.OPEN)
+        record_tool_call(tool_name, "failed", elapsed)
 
         if last_err is not None and not last_err.retryable:
             logger.warning(f"[tool] 不可重试错误，短路返回: {last_err}")
