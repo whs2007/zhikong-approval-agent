@@ -96,6 +96,28 @@ PENDING_APPROVALS = Gauge(
     registry=REGISTRY,
 )
 
+# ---- LLM 调用治理（P1-4） ----
+
+LLM_CALLS = Counter(
+    "zhikong_llm_calls_total",
+    "LLM 调用结果统计（success / failed / fallback / throttled）",
+    ["provider", "outcome"],
+    registry=REGISTRY,
+)
+
+LLM_CALL_DURATION = Histogram(
+    "zhikong_llm_call_duration_seconds",
+    "单次 LLM 调用耗时（秒，含重试）",
+    ["provider"],
+    registry=REGISTRY,
+)
+
+LLM_INFLIGHT = Gauge(
+    "zhikong_llm_inflight",
+    "当前并发占用 LLM 的调用数（配合 LLM_MAX_CONCURRENCY 观察是否打满）",
+    registry=REGISTRY,
+)
+
 
 # ----------------------------- 路径归一化 -----------------------------
 
@@ -175,6 +197,13 @@ def set_breaker_open(is_open: bool) -> None:
 
 def set_pending_approvals(count: int) -> None:
     PENDING_APPROVALS.set(max(0, int(count)))
+
+
+def record_llm_call(provider: str, outcome: str, duration_seconds: float = 0.0) -> None:
+    """记录一次 LLM 调用的最终结果与耗时（耗时含重试）。"""
+    prov = provider or "unknown"
+    LLM_CALLS.labels(provider=prov, outcome=outcome or "unknown").inc()
+    LLM_CALL_DURATION.labels(provider=prov).observe(max(0.0, duration_seconds))
 
 
 def render_metrics() -> tuple[bytes, str]:

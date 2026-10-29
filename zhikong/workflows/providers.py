@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -29,6 +30,19 @@ def amount_risk_floor(amount: float) -> str:
     if amount > settings.MEDIUM_RISK_THRESHOLD:
         return "medium"
     return "low"
+
+
+class LLMError(RuntimeError):
+    """LLM 调用失败。
+
+    - `retryable=True`：网络抖动 / 超时 / 5xx / 429 —— 重试有意义；
+    - `retryable=False`：鉴权失败 / 参数非法 / 响应无法解析 —— 重试无意义，应立即降级或失败。
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True, status: int | None = None) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.status = status
 
 
 def enforce_risk_floor(risk: str, amount: float) -> str:
@@ -201,15 +215,18 @@ class OpenAILLM(LLMProvider):
 
     def analyze(self, *, request_type: str, detail: str, amount: float,
                 department: str, knowledge: str) -> AnalysisResult:
+        """调用模型；失败抛 `LLMError`（重试与降级由大模型网关 LLMGateway 统一处理）。
+
+        刻意不在本方法内静默降级：否则上层无法区分"调用失败"与"模型结论"，
+        重试与指标都会失真。
+        """
         messages = self._build_messages(request_type, detail, amount, department, knowledge)
-        try:
-            content = self._chat(messages)
-            return self._parse(content, amount)
-        except Exception as e:  # 失败回退规则
-            logger.warning(f"[llm] OpenAI 调用失败，回退规则: {e}")
-            return RuleBasedLLM().analyze(
-                request_type=request_type, detail=detail, amount=amount,
-                department=department, knowledge=knowledge)
+        content = self._chat(messages)
+        return self._parse(content, amount)
+
+    @property
+    def name(self) -> str:
+        return f"openai:{settings.OPENAI_MODEL}"
 
     def _build_messages(self, rt, detail, amount, dept, knowledge) -> list[dict]:
         """指令与不可信输入分离：规则进 system，申请内容用 <request> 包裹并声明为数据。
@@ -235,6 +252,7 @@ class OpenAILLM(LLMProvider):
         ]
 
     def _chat(self, messages: list[dict]) -> str:
+        """单次 HTTP 调用；按错误类型标注是否可重试（P1-4）。"""
         body = json.dumps({
             "model": settings.OPENAI_MODEL,
             "messages": messages,
@@ -245,9 +263,23 @@ class OpenAILLM(LLMProvider):
             data=body, headers={
                 "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
                 "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode())
-        return data["choices"][0]["message"]["content"]
+        timeout = settings.LLM_TIMEOUT_SECONDS
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode()
+        except urllib.error.HTTPError as e:
+            # 429（限流）与 5xx 属瞬时故障可重试；4xx（鉴权/参数）重试无意义
+            retryable = e.code == 429 or e.code >= 500
+            raise LLMError(f"LLM HTTP {e.code}", retryable=retryable, status=e.code) from e
+        except TimeoutError as e:
+            raise LLMError(f"LLM 调用超时（>{timeout}s）", retryable=True) from e
+        except OSError as e:
+            raise LLMError(f"LLM 网络错误: {e}", retryable=True) from e
+        try:
+            data = json.loads(raw)
+            return data["choices"][0]["message"]["content"]
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            raise LLMError(f"LLM 响应格式非法: {e}", retryable=False) from e
 
     def _parse(self, content: str, amount: float) -> AnalysisResult:
         try:
@@ -278,18 +310,24 @@ class DashScopeLLM(OpenAILLM):
 
 
 def build_llm() -> LLMProvider:
+    """构建 LLM Provider；非规则模型一律套上治理网关（P1-4）。
+
+    网关内联导入以避免与 workflows.llm_gateway 形成循环依赖。
+    """
+    from workflows.llm_gateway import LLMGateway
+
     p = settings.LLM_PROVIDER
     if p == "rule":
         return RuleBasedLLM()
     if p == "openai":
         try:
-            return OpenAILLM()
+            return LLMGateway(OpenAILLM())
         except RuntimeError as e:
             logger.warning(f"[llm] {e}，回退规则")
             return RuleBasedLLM()
     if p == "dashscope":
         try:
-            return DashScopeLLM()
+            return LLMGateway(DashScopeLLM())
         except RuntimeError as e:
             logger.warning(f"[llm] {e}，回退规则")
             return RuleBasedLLM()

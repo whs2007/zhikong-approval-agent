@@ -104,6 +104,16 @@ class Settings:
     # 测试环境由 conftest 置 0 以保证用例确定性。
     TOOL_FAILURE_RATE: float = _env_float("TOOL_FAILURE_RATE", 0.4)
 
+    # ---- LLM 调用治理（P1-4：超时 / 退避重试 / 并发限流 / 降级） ----
+    LLM_TIMEOUT_SECONDS: float = _env_float("LLM_TIMEOUT_SECONDS", 20.0)
+    LLM_MAX_RETRIES: int = _env_int("LLM_MAX_RETRIES", 2)
+    # 并发上限：图在 to_thread 中执行（同步），故用线程信号量限流
+    LLM_MAX_CONCURRENCY: int = _env_int("LLM_MAX_CONCURRENCY", 4)
+    # 等待并发额度的排队上限；超时即降级，避免无限排队拖垮请求
+    LLM_QUEUE_TIMEOUT_SECONDS: float = _env_float("LLM_QUEUE_TIMEOUT_SECONDS", 5.0)
+    # 重试耗尽后是否降级到规则模型（关闭则直接抛错，适用于"结论必须来自 LLM"的场景）
+    LLM_FALLBACK_ENABLED: bool = _env_bool("LLM_FALLBACK_ENABLED", True)
+
     # ---- 审批超时（进阶） ----
     APPROVAL_TIMEOUT_HOURS: int = _env_int("APPROVAL_TIMEOUT_HOURS", 24)
     APPROVAL_ESCALATE_HOURS: int = _env_int("APPROVAL_ESCALATE_HOURS", 72)

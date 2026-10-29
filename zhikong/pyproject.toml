@@ -37,6 +37,7 @@ ignore = [
 "workflows/tools.py" = ["BLE001"]
 "workflows/providers.py" = ["BLE001"]
 "workflows/agents.py" = ["BLE001", "PLW0603"]
+"workflows/llm_gateway.py" = ["BLE001"]
 "services/audit_service.py" = ["BLE001"]
 "services/knowledge_service.py" = ["BLE001"]
 "api/main.py" = ["BLE001"]
