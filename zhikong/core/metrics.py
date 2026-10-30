@@ -124,6 +124,13 @@ LLM_INFLIGHT = Gauge(
     registry=REGISTRY,
 )
 
+LLM_TOKENS = Counter(
+    "zhikong_llm_tokens_total",
+    "LLM token 消耗（按 provider 与类型：prompt / completion）",
+    ["provider", "type"],
+    registry=REGISTRY,
+)
+
 
 # ----------------------------- 路径归一化 -----------------------------
 
@@ -214,6 +221,20 @@ def record_llm_call(provider: str, outcome: str, duration_seconds: float = 0.0) 
     prov = provider or "unknown"
     LLM_CALLS.labels(provider=prov, outcome=outcome or "unknown").inc()
     LLM_CALL_DURATION.labels(provider=prov).observe(max(0.0, duration_seconds))
+
+
+def record_llm_tokens(provider: str, *, prompt_tokens: int = 0,
+                      completion_tokens: int = 0) -> None:
+    """记录一次 LLM 调用的 token 消耗（prompt / completion 分开计）。
+
+    规则兜底（RuleBasedLLM）不消耗 token，调用方传 0 即可；真实 provider
+    在响应里拿到 usage 后回传，便于在 Grafana 看 token 成本。
+    """
+    prov = provider or "unknown"
+    if prompt_tokens:
+        LLM_TOKENS.labels(provider=prov, type="prompt").inc(prompt_tokens)
+    if completion_tokens:
+        LLM_TOKENS.labels(provider=prov, type="completion").inc(completion_tokens)
 
 
 def render_metrics() -> tuple[bytes, str]:

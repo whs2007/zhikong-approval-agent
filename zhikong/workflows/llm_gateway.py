@@ -21,7 +21,7 @@ from collections.abc import Callable
 
 from core.config import settings
 from core.logging import logger
-from core.metrics import LLM_INFLIGHT, record_llm_call
+from core.metrics import LLM_INFLIGHT, record_llm_call, record_llm_tokens
 from workflows.providers import (
     AnalysisResult,
     LLMError,
@@ -91,6 +91,11 @@ class LLMGateway(LLMProvider):
                     LLM_INFLIGHT.dec()
                     self._sem.release()
                 record_llm_call(self._name, "success", time.perf_counter() - started)
+                record_llm_tokens(
+                    self._name,
+                    prompt_tokens=result.prompt_tokens,
+                    completion_tokens=result.completion_tokens,
+                )
                 return result
             except LLMError as e:
                 last_err = e

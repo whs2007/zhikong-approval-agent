@@ -1,0 +1,39 @@
+# 智控 · 仅可观测组件（T1 证据取证用）
+#
+# 与 docker-compose.monitoring.yml 的区别：不含 app 服务。
+# 本沙箱构建 app 镜像受 PyPI 限速极慢，故 app 以本地 uvicorn 运行；
+# 通过 extra_hosts 把 prometheus 里的 `zhikong` 解析到宿主网关，
+# 从而复用【同一份】已提交的 prometheus.yml / alert.rules.yml / grafana 面板。
+#
+# 用户在生产/正常网络下直接 `docker compose -f docker-compose.monitoring.yml up -d --build`
+# 即可（app 作为容器一起编排，targets 仍是 zhikong:8000）。
+#
+# 用法：docker compose -f docker-compose.obs-only.yml up -d
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+    ports:
+      - "19090:9090"
+    extra_hosts:
+      - "zhikong:host-gateway"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "13000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped

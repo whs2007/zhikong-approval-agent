@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from core.config import settings
 from core.security import ROLE_ADMIN, ROLE_APPROVER, decode_jwt
 from models.user import User
 from services.auth_service import get_by_id
@@ -49,6 +50,33 @@ def get_current_user_optional(
     if user is None or not user.is_active:
         return None
     return user
+
+
+def get_scrape_access(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> None:
+    """/metrics 刮取鉴权（T1 可观测性闭环）：有效 JWT 或静态 METRICS_TOKEN 二选一。
+
+    - 未配置 METRICS_TOKEN 时退化为仅 JWT（保持原行为，不降低安全姿态）；
+    - 配置后，Prometheus 用静态令牌即可抓取，无需为每个采集器签发/轮换短期 JWT。
+    指标端点不依赖具体用户身份，故仅用于放行（返回 None）。
+    """
+    if creds is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少认证令牌", headers={"WWW-Authenticate": "Bearer"})
+    # 先尝试 JWT（任意有效用户）
+    try:
+        get_current_user(creds)
+        return
+    except HTTPException:
+        pass
+    # 再尝试静态刮取令牌
+    if settings.METRICS_TOKEN and creds.credentials == settings.METRICS_TOKEN:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="令牌无效", headers={"WWW-Authenticate": "Bearer"})
 
 
 def require_roles(*roles: str):

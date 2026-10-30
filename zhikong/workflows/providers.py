@@ -233,6 +233,8 @@ class AnalysisResult:
     reason: str
     required_approvers: list[str] = field(default_factory=list)
     model: str = "rule"
+    prompt_tokens: int = 0     # 真实 provider 回填；规则兜底为 0
+    completion_tokens: int = 0
 
 
 class LLMProvider(ABC):
@@ -282,8 +284,8 @@ class OpenAILLM(LLMProvider):
         重试与指标都会失真。
         """
         messages = self._build_messages(request_type, detail, amount, department, knowledge)
-        content = self._chat(messages)
-        return self._parse(content, amount)
+        content, pt, ct = self._chat(messages)
+        return self._parse(content, amount, pt, ct)
 
     @property
     def name(self) -> str:
@@ -312,8 +314,11 @@ class OpenAILLM(LLMProvider):
             {"role": "user", "content": user},
         ]
 
-    def _chat(self, messages: list[dict]) -> str:
-        """单次 HTTP 调用；按错误类型标注是否可重试（P1-4）。"""
+    def _chat(self, messages: list[dict]) -> tuple[str, int, int]:
+        """单次 HTTP 调用；按错误类型标注是否可重试（P1-4）。
+
+        返回 (内容, prompt_tokens, completion_tokens)；无 usage 时记 0。
+        """
         body = json.dumps({
             "model": settings.OPENAI_MODEL,
             "messages": messages,
@@ -338,11 +343,16 @@ class OpenAILLM(LLMProvider):
             raise LLMError(f"LLM 网络错误: {e}", retryable=True) from e
         try:
             data = json.loads(raw)
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            usage = data.get("usage", {}) or {}
+            pt = int(usage.get("prompt_tokens", 0) or 0)
+            ct = int(usage.get("completion_tokens", 0) or 0)
+            return content, pt, ct
         except (json.JSONDecodeError, KeyError, IndexError) as e:
             raise LLMError(f"LLM 响应格式非法: {e}", retryable=False) from e
 
-    def _parse(self, content: str, amount: float) -> AnalysisResult:
+    def _parse(self, content: str, amount: float,
+               prompt_tokens: int = 0, completion_tokens: int = 0) -> AnalysisResult:
         try:
             obj = json.loads(content)
             rl = str(obj.get("risk_level", "")).lower()
@@ -354,7 +364,9 @@ class OpenAILLM(LLMProvider):
                 reason = f"[已按金额阈值强制提升 {rl} -> {floored}] {reason}"
             return AnalysisResult(risk_level=floored, reason=reason,
                                  required_approvers=obj.get("required_approvers", []),
-                                 model=settings.OPENAI_MODEL)
+                                 model=settings.OPENAI_MODEL,
+                                 prompt_tokens=prompt_tokens,
+                                 completion_tokens=completion_tokens)
         except Exception:
             return RuleBasedLLM().analyze(
                 request_type="", detail="", amount=amount, department="", knowledge="")

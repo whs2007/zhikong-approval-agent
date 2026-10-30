@@ -1,0 +1,38 @@
+# 智控 · Prometheus 抓取配置（T1 可观测性闭环）
+#
+# 抓取目标：
+#   - zhikong 应用（/api/v1/metrics），使用静态 METRICS_TOKEN 作为 Bearer 鉴权
+#     （与 app 容器环境变量 METRICS_TOKEN 一致；演示令牌，生产须替换为随机串）。
+#   - prometheus 自身。
+#
+# 告警规则见 alert.rules.yml（错误率 > 5% / P95 > 3s / LLM 降级 > 0）。
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: zhikong-demo
+
+rule_files:
+  - /etc/prometheus/alert.rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  - job_name: zhikong
+    metrics_path: /api/v1/metrics
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials: zhikong-monitoring-demo-token
+    static_configs:
+      - targets: ['zhikong:8000']
+        labels:
+          tier: app
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

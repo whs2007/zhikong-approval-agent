@@ -1,0 +1,58 @@
+# 智控 · 可观测性栈（T1 最后一公里）
+#
+# 目标：把"有指标无场景"补成"有指标有证据"——
+#   prometheus 抓取 /api/v1/metrics，grafana 出面板，告警规则覆盖三条 SLO。
+#
+# 用法：
+#   docker compose -f docker-compose.monitoring.yml up -d --build
+# 访问：
+#   app        http://localhost:8000        （演示账号 admin/admin123, approver01/approver123, applicant01/applicant123）
+#   prometheus http://localhost:9090        （Status → Targets 看 zhikong UP；Alerts 看规则）
+#   grafana    http://localhost:3000        （admin/admin，已预置数据源与面板 zhikong-obs）
+#
+# 安全说明（诚实标注）：
+#   - METRICS_TOKEN 为演示刮取令牌，与 prometheus.yml 中 authorization.credentials 一致；
+#     生产须替换为随机串并通过 secret 注入，切勿沿用此值。
+#   - grafana 默认 admin/admin，仅用于本地演示；生产须改密 + 关匿名。
+#   - 数据落在 ./.monitoring-data（已 gitignore），与业务 compose 的 ./data 隔离。
+
+services:
+  zhikong:
+    build: .
+    environment:
+      ENV: dev
+      DEMO_SEED: "1"
+      DEMO_ADMIN_PASSWORD: admin123
+      DEMO_APPROVER_PASSWORD: approver123
+      DEMO_APPLICANT_PASSWORD: applicant123
+      LLM_PROVIDER: rule
+      EMBEDDING_PROVIDER: local
+      METRICS_TOKEN: zhikong-monitoring-demo-token
+    volumes:
+      - ./.monitoring-data:/app/data
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped

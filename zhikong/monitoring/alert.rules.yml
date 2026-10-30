@@ -1,0 +1,48 @@
+# 智控 · Prometheus 告警规则（T1 可观测性闭环）
+#
+# 三条核心 SLO 告警：
+#   1. ErrorRateHigh      —— 近 5 分钟 HTTP 5xx 错误率 > 5%
+#   2. LatencyP95High     —— 近 5 分钟 HTTP P95 延迟 > 3s
+#   3. LLMDegradation     —— 近 10 分钟出现任意 LLM 降级（fallback），说明主模型
+#                            不可用 / 被限流 / 并发打满，须立即关注。
+#
+# 说明（诚实标注）：当前未部署 Alertmanager 接收通道（邮件/钉钉/Webhook），
+# 告警仅在 Prometheus Web 的 Alerts 页可见；生产须补 Alertmanager 路由。
+
+groups:
+  - name: zhikong_slo
+    rules:
+      - alert: ErrorRateHigh
+        expr: |
+          (
+            sum(rate(zhikong_http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(zhikong_http_requests_total[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP 5xx 错误率超过 5%"
+          description: "近 5 分钟 5xx 错误率 {{ $value | humanizePercentage }}，超过 5% 阈值，请排查下游依赖与异常。"
+
+      - alert: LatencyP95High
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(zhikong_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP P95 延迟超过 3s"
+          description: "近 5 分钟 P95 延迟 {{ $value | humanizeDuration }}，超过 3s 阈值，请排查慢请求与资源瓶颈。"
+
+      - alert: LLMDegradation
+        expr: increase(zhikong_llm_calls_total{outcome="fallback"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM 降级被触发"
+          description: "近 10 分钟出现 {{ $value }} 次 LLM 降级（fallback），主模型可能不可用、被限流或并发打满。"

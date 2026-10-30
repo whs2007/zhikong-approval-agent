@@ -48,6 +48,13 @@ class Settings:
     # 代码库内不含任何可用密钥：缺省为空，由 _ensure_dev_secret 在非生产环境
     # 生成随机密钥并持久化到 data/db/.dev_secret（已 gitignore），生产环境缺失即启动失败。
     SECRET_KEY: str = _env("SECRET_KEY", "")
+
+    # 监控刮取令牌（T1 可观测性闭环）：Prometheus 等采集端用它作为 Bearer 抓取
+    # /metrics，无需为每个采集器签发/轮换短期 JWT。
+    # - 留空：/metrics 仅接受 JWT（保持原有行为，不降低安全姿态）；
+    # - 设置后：JWT 与 该令牌 二选一即可访问 /metrics。
+    # 指标可能暴露业务量等运营信息，故仍要求令牌；切勿用弱令牌上线。
+    METRICS_TOKEN: str = _env("METRICS_TOKEN", "")
     JWT_EXPIRE_MINUTES: int = _env_int("JWT_EXPIRE_MINUTES", 60)
     JWT_ALG: str = "HS256"
 

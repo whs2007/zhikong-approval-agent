@@ -2,10 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 系统依赖（用于 build 阶段编译可选包；如不需要可精简）
-RUN apt-get update && apt-get install -y --no-install-recommends gcc \
-    && rm -rf /var/lib/apt/lists/*
-
+# 依赖均为预编译 wheel（numpy / langgraph / fastapi 等），无需 gcc 编译，
+# 故不安装编译工具链，加快构建并缩小镜像。
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

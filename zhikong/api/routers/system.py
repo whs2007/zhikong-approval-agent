@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
 
-from api.deps import AdminUser, get_current_user
+from api.deps import AdminUser, get_scrape_access
 from core import metrics as metrics_mod
 from core.config import settings
 from core.logging import logger
@@ -31,11 +31,11 @@ def health():
 
 
 @router.get("/metrics")
-def metrics(user: User = Depends(get_current_user)):
-    """Prometheus 抓取端点（P1-3）。
+def metrics(_: None = Depends(get_scrape_access)):
+    """Prometheus 抓取端点（P1-3 + T1 可观测性闭环）。
 
     返回标准 Prometheus 文本格式（不再是审计表全量 COUNT 的 JSON）。
-    保留鉴权：指标可能暴露业务量等敏感运营信息，无鉴权暴露属安全隐患。
+    鉴权保留：接受有效 JWT 或静态 METRICS_TOKEN（二选一），避免指标被匿名暴露。
     """
     # Gauge 类瞬时指标需在拉取时刷新：待审批积压数
     try:
@@ -48,7 +48,7 @@ def metrics(user: User = Depends(get_current_user)):
 
 
 @router.get("/metrics/summary", response_model=ApiResponse)
-def metrics_summary(user: User = Depends(get_current_user)):
+def metrics_summary(_: None = Depends(get_scrape_access)):
     """业务概览（JSON）：保留 P1-3 之前的行为，供前端/人工查看。"""
     rows = audit_query(size=100000)["items"]
     total = len(rows)

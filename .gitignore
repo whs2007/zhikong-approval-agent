@@ -22,3 +22,7 @@ venv/
 *.sqlite3
 
 .DS_Store
+
+# 可观测性栈运行期数据（T1）：与业务 ./data 隔离，不入库
+**/.monitoring-data/
+
