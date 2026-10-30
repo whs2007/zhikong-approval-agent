@@ -69,9 +69,23 @@ jobs:
           pip install pip-audit
           pip-audit -r requirements.txt
 
-      - name: 秘密扫描（gitleaks）
-        uses: gitleaks/gitleaks-action@v2
+      # 直接跑官方二进制，不用 gitleaks-action：
+      # 该 action 在"首次推送"时会拼出 <root-commit>^..HEAD，根提交无父节点导致
+      # git 报错 → action 判失败（日志实为 "no leaks found"）。显式 --log-opts=--all
+      # 扫描全部历史，行为确定且可本地复现。
+      - name: 秘密扫描（gitleaks，全历史）
+        working-directory: .
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 组织/私有仓库需配置 GITLEAKS_LICENSE secret；若暂无许可可先改为
-          # continue-on-error: true 以免阻塞流水线（但不建议长期关闭）。
+          GITLEAKS_VERSION: "8.24.3"
+        run: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks version
+          # 失败即中断（exit-code=2 表示"发现泄露"），红输出已 redact
+          /tmp/gitleaks git \
+            --config "${GITHUB_WORKSPACE}/.gitleaks.toml" \
+            --redact --no-banner --verbose --exit-code 2 \
+            --log-opts="--all" \
+            "${GITHUB_WORKSPACE}"

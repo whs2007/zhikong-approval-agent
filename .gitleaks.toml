@@ -1,0 +1,37 @@
+# gitleaks 配置（T1 后补：修 CI 秘密扫描门禁）
+#
+# 背景：首版用 gitleaks/gitleaks-action@v2，在"仓库首次推送"时会自动生成
+#   --log-opts=<base>^..<head>
+# 而 base 是根提交（无父节点），`cf73e68^` 不存在 → git 报错 → action 判失败，
+# 即使日志里明确是 "no leaks found"。故改为直接跑官方二进制 + 显式 --log-opts=--all，
+# 行为确定、可本地复现。
+#
+# 本文件只做"允许列表"：把演示/测试用的**假凭据**排除，避免噪声淹没真问题。
+# 注意：允许的是「这些具体假值」和「测试目录」，不是关闭整类规则。
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "演示令牌、测试假凭据、文档示例（非真实秘密）"
+
+# 测试代码与文档示例天然含假凭据；真实密钥不应出现在这两处，
+# 若出现说明流程有问题，由 code review 兜底（不在 secret scan 职责内）。
+paths = [
+  '''^zhikong/tests/.*''',
+  '''^zhikong/scripts/mock_llm_server\.py''',
+  '''^docs/.*\.md$''',
+  '''^zhikong/docs/.*\.md$''',
+  '''^README\.md$''',
+]
+
+regexes = [
+  # 演示账号口令（.env.example / compose / 证据文档中出现，均为公开演示值）
+  '''admin123''',
+  '''approver123''',
+  '''applicant123''',
+  # 监控刮取演示令牌（docker-compose.obs-only.yml 与证据文档）
+  '''zhikong-monitoring-demo-token''',
+  # 本地 mock LLM 的占位 key
+  '''OPENAI_API_KEY=test''',
+]
