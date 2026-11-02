@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
@@ -17,6 +18,10 @@ from workflows.agents import (
     route_after_execution,
 )
 from workflows.state import WorkflowState
+
+# 长驻资源持有表：PostgresSaver 的连接一旦被 GC 回收就会失效，
+# 必须由模块级引用保活（详见 build_checkpointer 内的注释）。
+_KEEPALIVE: dict[str, Any] = {}
 
 
 def build_checkpointer():
@@ -45,16 +50,25 @@ def build_checkpointer():
                 "请设置 POSTGRES_URL，或将 CHECKPOINTER 设为 sqlite。")
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
+            from psycopg import Connection
+            from psycopg.rows import dict_row
         except ImportError as e:
             raise RuntimeError(
                 "CHECKPOINTER=postgres 需要安装 langgraph-checkpoint-postgres 与 psycopg。"
                 "注意：本项目 auth/audit 业务库仍为 SQLite，水平扩展前需一并迁移，"
                 "否则多副本状态仍不一致（见 docs/03-数据库与持久化设计.md）。"
             ) from e
-        # 长生命周期：进入上下文并保持连接（进程存活期内有效）
-        saver = PostgresSaver.from_conn_string(settings.POSTGRES_URL).__enter__()
-        saver.setup()
-        logger.info("[checkpointer] 使用 PostgresSaver")
+        # 连接必须自己持有并保活，不能用 PostgresSaver.from_conn_string().__enter__()：
+        # 那是一个 @contextmanager，.__enter__() 之后若不保留该生成器对象，
+        # 它会被 GC 回收并触发 finally 关闭连接，紧接着 setup() 就报
+        # "the connection is closed"（本仓库实测踩过，见 docs/20）。
+        conn = Connection.connect(
+            settings.POSTGRES_URL, autocommit=True, prepare_threshold=0,
+            row_factory=dict_row)
+        _KEEPALIVE["pg_conn"] = conn
+        saver = PostgresSaver(conn)
+        saver.setup()  # 幂等建表（checkpoints / checkpoint_blobs / checkpoint_writes）
+        logger.info("[checkpointer] 使用 PostgresSaver（连接长驻至进程退出）")
         return saver
 
     raise ValueError(f"未知 CHECKPOINTER={cp}，仅支持 sqlite | memory | postgres")

@@ -1,0 +1,55 @@
+# PostgreSQL 版 Checkpointer（可选部署）
+#
+# 用途：把工作流状态从单机 SQLite 换到 PostgreSQL，验证"多副本/跨进程恢复"的可行性。
+# 已知边界（不要误解）：
+#   - 本 compose 只把 **Checkpointer** 切到 PG；auth/audit 业务库仍是 SQLite。
+#     多副本真正一致需要把业务库一并迁移（见 docs/20）。
+#   - 这是"能跑通 + 能恢复"的验证环境，不是高可用部署（单节点、无副本、无备份策略）。
+#
+# 用法：
+#   docker compose -f docker-compose.postgres.yml up -d postgres     # 只起库，应用本地跑
+#   docker compose -f docker-compose.postgres.yml up -d --build      # 连应用一起起
+#   docker compose -f docker-compose.postgres.yml down -v            # 清库
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zhikong
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zhikong_dev_pw}
+      POSTGRES_DB: zhikong
+    ports:
+      # 宿主用 15432，避免与本机已有 5432 冲突
+      - "15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zhikong -d zhikong"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENV: dev
+      CHECKPOINTER: postgres
+      POSTGRES_URL: postgresql://zhikong:${POSTGRES_PASSWORD:-zhikong_dev_pw}@postgres:5432/zhikong
+      # 演示种子：仅在 ENV 属于 dev 白名单且显式开启时生效
+      DEMO_SEED: "1"
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-admin123}
+      DEMO_APPROVER_PASSWORD: ${DEMO_APPROVER_PASSWORD:-approver123}
+      DEMO_APPLICANT_PASSWORD: ${DEMO_APPLICANT_PASSWORD:-applicant123}
+      LLM_PROVIDER: rule
+      VECTOR_BACKEND: auto
+      METRICS_TOKEN: ${METRICS_TOKEN:-zhikong-monitoring-demo-token}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

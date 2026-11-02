@@ -1,0 +1,9 @@
+# PostgreSQL Checkpointer 的可选依赖（不影响默认 SQLite 部署）
+#
+# 安装：pip install -r requirements-postgres.txt
+# 启用：CHECKPOINTER=postgres  POSTGRES_URL=postgresql://user:pw@host:5432/db
+#
+# 为什么不放进 requirements.txt：默认部署（单机 SQLite）用不到，且 psycopg 带二进制轮子，
+# 会增加 CI 体积与安装时间。可选化是刻意的取舍，不是遗漏。
+langgraph-checkpoint-postgres>=2.0
+psycopg[binary]>=3.1
