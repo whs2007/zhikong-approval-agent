@@ -1,0 +1,28 @@
+# 智控 · Alertmanager 路由配置（T3 告警闭环）
+#
+# 定位：把 Prometheus 里"只可见"的告警，变成"能送达"的事件。
+# 本文件用最简路由（单 receiver + 按 alertname 分组）演示闭环；
+# 生产应在此扩展：severity=critical 走值班电话、warning 走群机器人、
+# 并按 team/service 标签分派（inhibit_rules 抑制"下游挂了导致上游全红"的噪声）。
+#
+# 接收端说明：
+#   host.docker.internal 由 compose 的 extra_hosts 映射到宿主网关，
+#   指向宿主机上运行的 alert_webhook_receiver.py（:8099）。
+#   这样演示环境无需真实钉钉/飞书账号，也能证明"告警真的送达了某个端点"。
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: zhikong-webhook
+  group_by: ["alertname", "severity"]
+  group_wait: 5s       # 首次聚合等待：同一批告警合并成一条通知，避免告警风暴
+  group_interval: 10s  # 同组新增告警的再通知间隔
+  repeat_interval: 30m # 持续未恢复时的重复提醒间隔
+
+receivers:
+  - name: zhikong-webhook
+    webhook_configs:
+      - url: "http://host.docker.internal:8099/alert"
+        send_resolved: true   # 恢复通知同样重要：没有 resolved 就无法区分"还在烧"与"已止血"
+        max_alerts: 20

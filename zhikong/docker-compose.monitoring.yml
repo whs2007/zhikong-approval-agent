@@ -41,6 +41,25 @@ services:
       - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
     ports:
       - "9090:9090"
+    extra_hosts:
+      # alertmanager 与 prometheus 同在默认网络，但 webhook 接收端在宿主机
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+
+  # 告警送达链路：Prometheus 规则 → Alertmanager 路由 → webhook 接收端
+  # 本地演示时先在宿主机跑 scripts/alert_webhook_receiver.py（:8099）
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   grafana:

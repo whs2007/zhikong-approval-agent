@@ -22,6 +22,22 @@ services:
       - "19090:9090"
     extra_hosts:
       - "zhikong:host-gateway"
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+
+  # 告警送达：没有它，规则只在 Prometheus 页面里"亮红灯"，没有任何人会被通知。
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "19093:9093"
+    extra_hosts:
+      # alertmanager 容器内访问宿主机的 webhook 接收端（:8099）
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   grafana:

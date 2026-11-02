@@ -93,6 +93,10 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 2. **持久化替代内存**：`SqliteSaver` 替代 `MemorySaver`，满足跨天/重启恢复。
 3. **条件中断替代全局中断**：用 `langgraph.types.interrupt` 仅在审批闸门暂停，避免重试循环被误暂停。
 4. **独立审计子系统**：append-only 审计库，与业务/Checkpointer 物理分离，可导出。
+5. **告警必须可达**：规则 + Alertmanager + Webhook 接收端构成闭环，做过真实故障演练
+   （见 `docs/22-告警闭环验证.md`）；"规则写了但 targets 为空"不算有告警。
+6. **容量用数据说话**：并发梯度压测 + Little's Law 验证 + 多 worker 反例，
+   结论是单进程写路径 ~94 RPS、瓶颈在 SQLite 写锁（见 `docs/21-并发压测与瓶颈定位.md`）。
 
 详见 `docs/` 各技术文档与 `docs/09-过程审计报告.md`。
 
@@ -100,7 +104,8 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 ## 六、交付物清单
 
-- 技术文档 9 份（`docs/`）
-- 企业级源码 1 套（`zhikong/`），含测试 12 项全绿
-- 容器化与部署配置（Dockerfile / docker-compose.yml / .env.example）
+- 技术文档 22 份（`docs/`），含压测报告、告警演练记录与面试问答
+- 企业级源码 1 套（`zhikong/`），含测试 117 项全绿（1 项因无 API Key 跳过）
+- 容器化与部署配置（Dockerfile / docker-compose.yml / docker-compose.monitoring.yml / .env.example）
+- 可复现证据（`zhikong/evidence/`）：压测原始数据、告警截图、webhook 送达记录
 - 过程审计报告（含审计检查点与埋点对照表）

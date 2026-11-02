@@ -1,0 +1,1 @@
+{"received_at": "2026-11-03T01:04:38", "status": "firing", "receiver": "zhikong-webhook", "alerts": [{"name": "LLMDegradation", "status": "firing", "severity": "warning", "summary": "LLM 降级被触发", "startsAt": "2026-11-02T17:04:33.508Z", "endsAt": "0001-01-01T00:00:00Z"}]}

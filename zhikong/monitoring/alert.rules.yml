@@ -6,8 +6,9 @@
 #   3. LLMDegradation     —— 近 10 分钟出现任意 LLM 降级（fallback），说明主模型
 #                            不可用 / 被限流 / 并发打满，须立即关注。
 #
-# 说明（诚实标注）：当前未部署 Alertmanager 接收通道（邮件/钉钉/Webhook），
-# 告警仅在 Prometheus Web 的 Alerts 页可见；生产须补 Alertmanager 路由。
+# 送达链路：Prometheus 评估规则 → Alertmanager（alertmanager.yml 路由）
+#           → webhook 接收端（scripts/alert_webhook_receiver.py）。
+# 闭环验证记录见 docs/22-告警闭环验证.md：LLMDegradation 曾被真实触发并送达。
 
 groups:
   - name: zhikong_slo
