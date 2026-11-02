@@ -17,6 +17,7 @@ import json
 import logging
 import sys
 import uuid
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from datetime import datetime
 
@@ -54,6 +55,31 @@ def reset_trace(tid_token: Token[str] | None = None, th_token: Token[str] | None
         _trace_id_var.reset(tid_token)
     if th_token is not None:
         _thread_id_var.reset(th_token)
+
+
+@contextmanager
+def trace_scope(*, trace_id: str | None = None, thread_id: str | None = None):
+    """不依赖 Token 的链路作用域，专供**跨执行上下文迭代的生成器**使用。
+
+    为什么需要另一个 API：`bind_trace` 返回的 `Token` 与"创建它的 Context"
+    强绑定。SSE 场景下同步生成器由 `iterate_in_threadpool` 驱动，每次 `next()`
+    可能落在不同的 Context 副本中，退出时 `reset(token)` 会抛
+    `ValueError: Token was created in a different Context`（实测：流已正常发完，
+    却在 finally 抛异常，把 200 变成 500）。
+
+    `ContextVar.set()` 不校验来源 Context，因此这里改为"记旧值 → set → 还原旧值"。
+    """
+    old_trace = _trace_id_var.get()
+    old_thread = _thread_id_var.get()
+    if trace_id is not None:
+        _trace_id_var.set(trace_id)
+    if thread_id is not None:
+        _thread_id_var.set(thread_id)
+    try:
+        yield
+    finally:
+        _trace_id_var.set(old_trace)
+        _thread_id_var.set(old_thread)
 
 
 def get_trace_id() -> str:

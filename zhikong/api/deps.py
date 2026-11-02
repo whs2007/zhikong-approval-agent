@@ -1,7 +1,7 @@
 """鉴权依赖（JWT + RBAC）。"""
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.config import settings
@@ -79,6 +79,42 @@ def get_scrape_access(
         detail="令牌无效", headers={"WWW-Authenticate": "Bearer"})
 
 
+def get_current_user_stream(
+    token: str | None = Query(
+        default=None, description="EventSource 兜底令牌（浏览器原生 EventSource 无法设请求头）"),
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> User:
+    """SSE 专用鉴权：`Authorization: Bearer` 优先，`?token=` 兜底。
+
+    为什么需要兜底：浏览器原生 `EventSource` 构造时**不能**设置请求头，
+    只能把凭据放 URL。若只支持 Bearer，前端就只能退化成 fetch 流式读取
+    （可行但演示/第三方接入不友好）。两种都支持，优先级明确：
+
+    - 有 Authorization 头时**只认头**，忽略 query（避免"头有效但 query 是攻击者
+      的令牌"这种混淆，也让常规调用路径行为与 get_current_user 完全一致）；
+    - 无头时才用 query 令牌。
+
+    安全代价：query 令牌会进 access log / 代理日志 / 浏览器历史，因此仅建议用于
+    短生命周期的演示与只读进度流；生产环境应优先 Bearer，并对日志脱敏。
+    """
+    raw = creds.credentials if creds is not None else token
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少认证令牌", headers={"WWW-Authenticate": "Bearer"})
+    try:
+        payload = decode_jwt(raw)
+        uid = payload.get("sub")
+        user = get_by_id(uid) if uid else None
+    except ValueError:
+        user = None
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="令牌无效或用户不可用", headers={"WWW-Authenticate": "Bearer"})
+    return user
+
+
 def require_roles(*roles: str):
     allowed = set(roles)
 
@@ -96,3 +132,20 @@ def require_roles(*roles: str):
 AdminUser = require_roles(ROLE_ADMIN)
 ApproverUser = require_roles(ROLE_APPROVER, ROLE_ADMIN)
 ApplicantUser = require_roles("applicant", ROLE_APPROVER, ROLE_ADMIN)
+
+
+def require_roles_stream(*roles: str):
+    """与 require_roles 同语义，但走流式鉴权（支持 ?token=）。"""
+    allowed = set(roles)
+
+    def _dep(user: User = Depends(get_current_user_stream)) -> User:
+        if user.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"权限不足，需要角色: {sorted(allowed)}")
+        return user
+
+    return _dep
+
+
+ApplicantUserStream = require_roles_stream("applicant", ROLE_APPROVER, ROLE_ADMIN)

@@ -763,23 +763,82 @@ function updateRiskHint() {
 }
 updateRiskHint();
 
+/* ------------------- SSE 流式提交 ------------------- */
+/* 逐帧解析：SSE 以空行分隔，一次 read() 可能拿到半个帧，故用 buf 缓存。 */
+async function streamSubmit(body, onEvent) {
+  var r = await fetch(API + "/workflow/submit/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + S.token },
+    body: JSON.stringify(body)
+  });
+  if (r.status === 401) { toast("登录已过期，请重新登录", "err"); logout(); throw new Error("401"); }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (!r.body) throw new Error("当前浏览器不支持流式读取");
+
+  var reader = r.body.getReader(), dec = new TextDecoder(), buf = "";
+  for (;;) {
+    var chunk = await reader.read();
+    if (chunk.done) break;
+    buf += dec.decode(chunk.value, { stream: true });
+    var cut;
+    while ((cut = buf.indexOf("\n\n")) >= 0) {
+      var block = buf.slice(0, cut); buf = buf.slice(cut + 2);
+      var name = "", data = "";
+      block.split("\n").forEach(function (line) {
+        if (line.indexOf("event: ") === 0) name = line.slice(7);
+        else if (line.indexOf("data: ") === 0) data += line.slice(6);
+      });
+      if (!name) continue;
+      var payload = {};
+      try { payload = data ? JSON.parse(data) : {}; } catch (e) { payload = {}; }
+      onEvent(name, payload);
+    }
+  }
+}
+
+var NODE_LABEL = { analyst: "分析", approval_gate: "审批", executor: "执行", monitor: "监控" };
+function renderStreamSteps() {
+  $("#nodeFlow").innerHTML = (S.steps && S.steps.length)
+    ? S.steps.map(function (s) {
+        return '<span class="step done"><span class="ic">✓</span>' +
+          esc(NODE_LABEL[s.node] || s.node) +
+          ' <span class="dim" style="font-size:11px">' + s.elapsed_ms + "ms</span></span>";
+      }).join('<span class="arrow-sep">→</span>')
+    : '<span class="dim">已连接，等待首个事件…</span>';
+}
+
 $("#submitBtn").onclick = async function () {
   var btn = this;
-  btn.disabled = true; btn.textContent = "提交中…";
+  var body = {
+    request_type: $("#rtype").value,
+    request_detail: $("#rdetail").value,
+    amount: parseFloat($("#ramt").value || 0),
+    department: $("#rdept").value
+  };
+  if (!body.request_detail) { toast("请填写申请详情", "err"); return; }
+  btn.disabled = true; btn.textContent = "执行中…";
+  S.steps = [];
+  $("#nodeFlow").innerHTML = '<span class="dim">正在建立流式连接…</span>';
+  $("#approvalCard").classList.add("hide");
+  var finished = null;
   try {
-    var body = {
-      request_type: $("#rtype").value,
-      request_detail: $("#rdetail").value,
-      amount: parseFloat($("#ramt").value || 0),
-      department: $("#rdept").value
-    };
-    if (!body.request_detail) { toast("请填写申请详情", "err"); return; }
-    var j = await api("POST", "/workflow/submit", body);
-    if (!j || j.code !== 0) { toast((j && j.message) || "提交失败", "err"); return; }
-    S.cur = j.data;
-    renderResult(j.data);
-    toast(j.message || "已提交", "ok");
-    loadPending();
+    await streamSubmit(body, function (ev, d) {
+      if (ev === "node") { S.steps.push(d); renderStreamSteps(); }
+      else if (ev === "done") { finished = d; }
+      else if (ev === "error") { toast(d.message || "执行失败", "err"); }
+    });
+    if (finished) {
+      var st = finished.state || {};
+      st.paused = finished.paused; st.next = finished.next;
+      renderResult(st);
+      toast(finished.paused ? "已提交，等待人工审批" : "已自动完成，用时 " +
+        finished.elapsed_ms + "ms", "ok");
+      loadPending(); loadSummary();
+    } else {
+      toast("流意外结束，未收到完成事件", "err");
+    }
+  } catch (e) {
+    toast("流式提交失败：" + e.message, "err");
   } finally {
     btn.disabled = false; btn.textContent = "提交工作流";
   }

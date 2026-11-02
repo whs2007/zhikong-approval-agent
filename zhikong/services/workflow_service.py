@@ -7,14 +7,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime
 
 from langgraph.types import Command
 
 from core.config import settings
-from core.logging import bind_trace, get_trace_id, reset_trace
+from core.logging import bind_trace, get_trace_id, logger, reset_trace, trace_scope
 from core.metrics import (
     observe_invoke_duration,
     record_workflow_final,
@@ -66,6 +68,77 @@ class WorkflowService:
                     "next": list(snap.next) if snap.next else []}
         finally:
             reset_trace(*tokens)
+
+    def _submit_stream_sync(self, state: dict, actor: str, actor_role: str) -> Iterator[str]:
+        """提交工作流并以 SSE 事件流的形式推送每个节点的进度。
+
+        为什么不用 `invoke` + 轮询：轮询只能看到"最终状态"，看不到中间过程；
+        而节点级进度（analyst 分析完 → 进入审批闸门 → executor 执行）正是
+        "实时推送执行进度"要表达的东西。LangGraph 的 `stream(stream_mode="updates")`
+        每完成一个节点产出一帧，天然对应一个 SSE event。
+
+        事件协议（前端按 event 名分支）：
+          start  {thread_id, trace_id, request_type, amount}
+          node   {node, elapsed_ms, risk_level?, approval_status?, execution_result?, ...}
+          done   {thread_id, paused, next, final, elapsed_ms, state}
+          error  {thread_id, message}   —— 流内异常不抛出，避免连接被直接掐断
+        """
+        thread_id = state["thread_id"]
+        trace_id = state.get("trace_id", "")
+        config = {"configurable": {"thread_id": thread_id}}
+        # 用 trace_scope 而非 bind_trace：见 core.logging.trace_scope 的说明——
+        # 同步生成器跨 Context 迭代，Token 无法 reset，会在 finally 抛 ValueError。
+        with trace_scope(trace_id=trace_id, thread_id=thread_id):
+            seq = 0
+            started = time.perf_counter()
+            try:
+                append(EventType.WORKFLOW_SUBMIT, actor=actor, actor_role=actor_role,
+                       thread_id=thread_id, trace_id=trace_id,
+                       detail={"request_type": state["request_type"],
+                               "amount": state["amount"],
+                               "department": state.get("department")})
+                yield _sse(seq, "start", {"thread_id": thread_id, "trace_id": trace_id,
+                                          "request_type": state["request_type"],
+                                          "amount": state["amount"]})
+                seq += 1
+
+                for chunk in self.app.stream(state, config, stream_mode="updates"):
+                    if not isinstance(chunk, dict):
+                        continue
+                    for node, update in chunk.items():
+                        # interrupt 在 updates 流里会以 "__interrupt__" 出现，
+                        # 它不是节点、没有状态增量，直接跳过；暂停与否由 done 说明。
+                        if node == "__interrupt__" or not isinstance(update, dict):
+                            continue
+                        yield _sse(seq, "node", _node_event(
+                            node, update, (time.perf_counter() - started) * 1000))
+                        seq += 1
+
+                snap = self.app.get_state(config)
+                values = (snap.values or {}) if snap is not None else {}
+                paused = bool(snap.next) if snap is not None else False
+                observe_invoke_duration(time.perf_counter() - started)
+                record_workflow_submission("approve" if paused else "execute")
+                record_workflow_final(_final_result(values, paused))
+                if paused:
+                    append(EventType.APPROVAL_PAUSED, actor="system", actor_role="system",
+                           thread_id=thread_id, trace_id=trace_id, node="approval_gate",
+                           detail={"risk_level": values.get("risk_level"),
+                                   "amount": state.get("amount")})
+                yield _sse(seq, "done", {
+                    "thread_id": thread_id,
+                    "paused": paused,
+                    "next": list(snap.next) if snap is not None and snap.next else [],
+                    "final": _final_result(values, paused),
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "state": _public_state(values),
+                })
+            except Exception as e:  # noqa: BLE001 —— 有意兜底
+                # 流式响应一旦开始发送就无法再改状态码，异常若继续上抛，
+                # 客户端只会看到"连接中断"；转成 error 事件才能让前端显示原因。
+                logger.exception(f"[stream] 工作流执行失败 thread={thread_id}")
+                yield _sse(seq, "error", {"thread_id": thread_id,
+                                          "message": str(e)[:200]})
 
     def _decide_sync(self, thread_id: str, approved: bool, comment: str,
                      actor: str, actor_role: str) -> dict:
@@ -158,6 +231,17 @@ class WorkflowService:
     async def pending(self) -> list[dict]:
         return await asyncio.to_thread(self._pending_sync)
 
+    def submit_stream(self, request: dict, actor: str, actor_role: str) -> Iterator[str]:
+        """返回同步事件迭代器，交由 StreamingResponse 在线程池中迭代。
+
+        构造 state 的逻辑与 submit 保持一致（同一套 thread_id / trace_id 规则），
+        保证「流式提交」与「普通提交」产生的工作流在审计与指标上无法区分。
+        """
+        thread_id = request.get("thread_id") or f"WF-{uuid.uuid4().hex[:12]}"
+        trace_id = get_trace_id() or new_trace_id()
+        state = _initial_state(request, thread_id, trace_id)
+        return self._submit_stream_sync(state, actor, actor_role)
+
 
 # ----------------------------- 工具 -----------------------------
 
@@ -176,6 +260,32 @@ def _aging_info(paused_at: str | None, now: datetime) -> dict:
         "overdue": hours > settings.APPROVAL_TIMEOUT_HOURS,
         "escalated": hours > settings.APPROVAL_ESCALATE_HOURS,
     }
+
+def _sse(seq: int, event: str, data: dict) -> str:
+    """按 SSE 规范拼一帧：id / event / data，帧间以空行分隔。
+
+    `json.dumps` 会把换行转义成 `\\n`，因此 data 永远单行，不会破坏帧结构。
+    """
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return f"id: {seq}\nevent: {event}\ndata: {payload}\n\n"
+
+
+# 可安全外发到前端的节点字段白名单。
+# 刻意不整体外发 update：节点内部可能带 knowledge_context（企业制度原文）、
+# 完整 analysis_report 等较敏感/较长的内容，进度流只需要"发生了什么"。
+_NODE_FIELDS = (
+    "risk_level", "approval_status", "execution_result",
+    "retry_count", "current_phase", "required_approvers",
+)
+
+
+def _node_event(node: str, update: dict, elapsed_ms: float) -> dict:
+    evt: dict = {"node": node, "elapsed_ms": round(elapsed_ms, 1)}
+    for k in _NODE_FIELDS:
+        if k in update and update[k] not in (None, "", [], {}):
+            evt[k] = update[k]
+    return evt
+
 
 def _final_result(values: dict, paused: bool) -> str:
     """由工作流最终状态推导终态标签（供 Prometheus 统计成功率）。"""
