@@ -131,6 +131,22 @@ LLM_TOKENS = Counter(
     registry=REGISTRY,
 )
 
+# 向量后端信息（info 型 gauge：值为 1 表示当前生效）。
+# 为什么要暴露：VECTOR_BACKEND=auto 会按依赖情况降级，若没人观测，
+# "以为在用 FAISS、实际在跑 numpy"这种不一致可以潜伏很久不被发现。
+VECTOR_BACKEND_INFO = Gauge(
+    "zhikong_vector_backend_info",
+    "当前实际生效的向量检索后端（backend=faiss|numpy|uninit，值恒为 1）",
+    ["backend"],
+    registry=REGISTRY,
+)
+
+VECTOR_INDEX_SIZE = Gauge(
+    "zhikong_vector_index_vectors",
+    "向量索引中的片段数（faiss 为 ntotal，numpy 为矩阵行数）",
+    registry=REGISTRY,
+)
+
 
 # ----------------------------- 路径归一化 -----------------------------
 
@@ -235,6 +251,14 @@ def record_llm_tokens(provider: str, *, prompt_tokens: int = 0,
         LLM_TOKENS.labels(provider=prov, type="prompt").inc(prompt_tokens)
     if completion_tokens:
         LLM_TOKENS.labels(provider=prov, type="completion").inc(completion_tokens)
+
+
+def set_vector_backend(backend: str, vectors: int = 0) -> None:
+    """刷新向量后端信息指标（在 /metrics 抓取时调用，保证 Gauge 反映实时状态）。"""
+    name = (backend or "uninit").strip().lower()
+    for known in ("faiss", "numpy", "uninit"):
+        VECTOR_BACKEND_INFO.labels(backend=known).set(1.0 if known == name else 0.0)
+    VECTOR_INDEX_SIZE.set(max(0, int(vectors)))
 
 
 def render_metrics() -> tuple[bytes, str]:

@@ -23,7 +23,10 @@ def health():
     try:
         audit_query(size=1)
         checks = {"audit_db": True, "checkpointer": True,
-                  "knowledge_chunks": ks.chunk_count()}
+                  "knowledge_chunks": ks.chunk_count(),
+                  # 暴露"实际生效"的向量后端：auto 模式下会按依赖降级，
+                  # 不暴露就无法发现"以为 FAISS、实际 numpy"的静默不一致。
+                  "vector_backend": ks.backend_name()}
     except Exception as e:  # pragma: no cover
         checks = {"audit_db": False, "error": str(e)}
     return ApiResponse(data={"status": "ok" if checks.get("audit_db") else "degraded",
@@ -37,12 +40,16 @@ def metrics(_: None = Depends(get_scrape_access)):
     返回标准 Prometheus 文本格式（不再是审计表全量 COUNT 的 JSON）。
     鉴权保留：接受有效 JWT 或静态 METRICS_TOKEN（二选一），避免指标被匿名暴露。
     """
-    # Gauge 类瞬时指标需在拉取时刷新：待审批积压数
+    # Gauge 类瞬时指标需在拉取时刷新：待审批积压数 + 向量后端/索引规模
     try:
         pending = workflow_service._pending_sync()
         metrics_mod.set_pending_approvals(len(pending))
     except Exception as e:  # pragma: no cover - 指标降级不应影响告警抓取
         logger.warning(f"[metrics] 刷新待审批数失败: {e}")
+    try:
+        metrics_mod.set_vector_backend(ks.backend_name(), ks.chunk_count())
+    except Exception as e:  # pragma: no cover
+        logger.warning(f"[metrics] 刷新向量后端指标失败: {e}")
     body, content_type = metrics_mod.render_metrics()
     return Response(content=body, media_type=content_type)
 

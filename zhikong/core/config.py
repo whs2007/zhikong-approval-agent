@@ -90,6 +90,19 @@ class Settings:
     # 向量检索
     TOP_K: int = _env_int("TOP_K", 3)
     EMBED_DIM: int = _env_int("EMBED_DIM", 256)
+    # 向量后端：auto（有 faiss 用 faiss，否则降级 numpy）| faiss（强制，缺失即启动失败）| numpy
+    # 刻意提供 faiss 强制档：避免"配置写 faiss、实际跑 numpy"的静默不一致。
+    VECTOR_BACKEND: str = _env("VECTOR_BACKEND", "auto")
+    # 索引规模低于该值时用 IndexFlatIP（精确、无训练成本）；
+    # 超过后切换到 IndexIVFFlat（需训练，用聚类换召回速度）。
+    # 默认 20000 是经验值：20k 以内 Flat 的暴力检索在毫秒级，建 IVF 反而更慢且损失召回。
+    FAISS_FLAT_MAX: int = _env_int("FAISS_FLAT_MAX", 20000)
+    # IVF 的聚类簇数；经验取 4*sqrt(n) ~ 16*sqrt(n)，过小则单簇过大、过大则训练样本不足
+    FAISS_NLIST: int = _env_int("FAISS_NLIST", 64)
+    # 查询时探测的簇数：nprobe 越大越准越慢（召回率/延迟的直接旋钮）
+    FAISS_NPROBE: int = _env_int("FAISS_NPROBE", 8)
+    # 索引持久化路径；空表示仅内存（进程重启后由 knowledge_service.build() 重建）
+    FAISS_INDEX_PATH: str = _env("FAISS_INDEX_PATH", "")
     # 混合检索：词项覆盖率打分所占权重（0=纯向量，1=纯关键词）
     HYBRID_LEXICAL_WEIGHT: float = _env_float("HYBRID_LEXICAL_WEIGHT", 0.5)
     # 最小相关度阈值：低于此值不返回片段，避免无关查询硬凑上下文导致幻觉

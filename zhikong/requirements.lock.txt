@@ -1,7 +1,7 @@
 # 依赖锁文件（P1-6）：精确版本，保证开发/CI/生产三环境依赖一致。
 # 生成方式：pip install --dry-run --report -r requirements.txt 解析完整依赖树后固化。
 # 重新生成：make lock（或 python scripts/gen_lock.py）；升级依赖后需重新生成并跑一次 CI。
-# 生成时间：2026-10-29T16:43:23+00:00（57 个包，含传递依赖）
+# 生成时间：2026-10-29T16:43:23+00:00（58 个包，含传递依赖）
 
 aiosqlite==0.22.1
 annotated-doc==0.0.5
@@ -11,6 +11,7 @@ certifi==2026.10.23
 charset-normalizer==3.5.2
 click==8.5.0
 distro==1.9.0
+faiss-cpu==1.15.1
 fastapi==0.162.0
 h11==0.16.0
 httpcore==1.0.9

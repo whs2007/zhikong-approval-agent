@@ -90,3 +90,13 @@ def search(query: str, top_k: int | None = None) -> str:
 
 def chunk_count() -> int:
     return _DOC_COUNT
+
+
+def backend_name() -> str:
+    """当前**实际**生效的向量后端（faiss | numpy | uninit）。
+
+    注意不调用 `_ensure_built()`：健康检查不应触发建库这种重操作。
+    配置里 VECTOR_BACKEND=auto 时，真实后端只有建库后才能确定，
+    所以这里读实例而非读配置——避免"配置写 faiss、实际跑 numpy"的自欺。
+    """
+    return _STORE.backend if _STORE is not None else "uninit"
