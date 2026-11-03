@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-11-03T10:36:23",
+  "base_url": "http://127.0.0.1:8000",
+  "duration_s": 40.0,
+  "warmup_s": 5.0,
+  "note": "客户端与服务端同机，数据用于相对比较与瓶颈定位，不作为容量承诺",
+  "results": [
+    {
+      "scenario": "submit",
+      "concurrency": 25,
+      "duration_s": 40.05,
+      "requests": 5743,
+      "ok": 5743,
+      "error_rate_pct": 0.0,
+      "rps": 143.4,
+      "p50_ms": 166.59,
+      "p95_ms": 264.82,
+      "p99_ms": 299.35,
+      "max_ms": 940.87,
+      "ttfb_p50_ms": 0.0,
+      "ttfb_p95_ms": 0.0,
+      "errors": {}
+    },
+    {
+      "scenario": "submit",
+      "concurrency": 100,
+      "duration_s": 40.53,
+      "requests": 5612,
+      "ok": 5612,
+      "error_rate_pct": 0.0,
+      "rps": 138.45,
+      "p50_ms": 694.6,
+      "p95_ms": 822.35,
+      "p99_ms": 2255.94,
+      "max_ms": 2376.45,
+      "ttfb_p50_ms": 0.0,
+      "ttfb_p95_ms": 0.0,
+      "errors": {}
+    }
+  ]
+}
