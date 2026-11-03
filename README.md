@@ -95,8 +95,11 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 4. **独立审计子系统**：append-only 审计库，与业务/Checkpointer 物理分离，可导出。
 5. **告警必须可达**：规则 + Alertmanager + Webhook 接收端构成闭环，做过真实故障演练
    （见 `docs/22-告警闭环验证.md`）；"规则写了但 targets 为空"不算有告警。
-6. **容量用数据说话**：并发梯度压测 + Little's Law 验证 + 多 worker 反例，
-   结论是单进程写路径 ~94 RPS、瓶颈在 SQLite 写锁（见 `docs/21-并发压测与瓶颈定位.md`）。
+6. **容量用数据说话**：并发梯度压测 + Little's Law 验证 + 多 worker 反例。写路径 25–97 RPS
+   取决于磁盘 fsync，瓶颈是「每次请求 3 次事务提交 + SQLite 单写锁」；按"可重建性"做
+   WAL 分级后 25→56 RPS（见 `docs/21-并发压测与瓶颈定位.md`）。
+7. **监控必须与被监控解耦**：抓取端点和业务共用线程池，过载时 `/metrics` 超时导致
+   `up=0`、延迟告警永不触发。已改为后台刷 Gauge、抓取只读内存（见 `docs/22-告警闭环验证.md`）。
 
 详见 `docs/` 各技术文档与 `docs/09-过程审计报告.md`。
 
@@ -108,4 +111,5 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 - 企业级源码 1 套（`zhikong/`），含测试 117 项全绿（1 项因无 API Key 跳过）
 - 容器化与部署配置（Dockerfile / docker-compose.yml / docker-compose.monitoring.yml / .env.example）
 - 可复现证据（`zhikong/evidence/`）：压测原始数据、告警截图、webhook 送达记录
+- 已知边界清单（`zhikong/KNOWN_LIMITATIONS.md`）：逐条说明没做什么、为什么、被问到怎么答
 - 过程审计报告（含审计检查点与埋点对照表）

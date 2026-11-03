@@ -2,7 +2,7 @@
 #
 # 三条核心 SLO 告警：
 #   1. ErrorRateHigh      —— 近 5 分钟 HTTP 5xx 错误率 > 5%
-#   2. LatencyP95High     —— 近 5 分钟 HTTP P95 延迟 > 3s
+#   2. LatencyP95High     —— 近 5 分钟「提交流程」P95 延迟 > 800ms
 #   3. LLMDegradation     —— 近 10 分钟出现任意 LLM 降级（fallback），说明主模型
 #                            不可用 / 被限流 / 并发打满，须立即关注。
 #
@@ -27,17 +27,26 @@ groups:
           summary: "HTTP 5xx 错误率超过 5%"
           description: "近 5 分钟 5xx 错误率 {{ $value | humanizePercentage }}，超过 5% 阈值，请排查下游依赖与异常。"
 
+      # 阈值 800ms 的来历（不是拍脑袋，见 docs/21 实测）：
+      #   10 并发 P95 = 126ms，25 并发 = 315ms，100 并发 = 1097ms。
+      #   800ms 落在「正常负载的 2.5 倍」与「过载」之间，能在用户明显感知前预警；
+      #   原先的 3s 阈值压测全程都够不到（峰值 1.24s），等于永不触发。
+      #
+      # 为什么按 path 过滤：延迟直方图混入了 /health 与 /metrics 抓取（<1ms），
+      # 会把整体 P95 稀释掉，导致真实慢请求被平均掉、告警失灵。
+      # 为什么 submit 与 submit/stream 合并统计：两者走同一张图、同一套节点，
+      # 延迟特征一致；合并可避免低频路径样本太少导致分位数抖动。
       - alert: LatencyP95High
         expr: |
           histogram_quantile(0.95,
-            sum(rate(zhikong_http_request_duration_seconds_bucket[5m])) by (le)
-          ) > 3
+            sum(rate(zhikong_http_request_duration_seconds_bucket{path=~"/api/v1/workflow/submit.*"}[5m])) by (le)
+          ) > 0.8
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "HTTP P95 延迟超过 3s"
-          description: "近 5 分钟 P95 延迟 {{ $value | humanizeDuration }}，超过 3s 阈值，请排查慢请求与资源瓶颈。"
+          summary: "提交流程 P95 延迟超过 800ms"
+          description: "近 5 分钟提交流程 P95 延迟 {{ $value | humanizeDuration }}，超过 800ms，疑似排队或存储锁竞争（见 docs/21）。"
 
       - alert: LLMDegradation
         expr: increase(zhikong_llm_calls_total{outcome="fallback"}[10m]) > 0

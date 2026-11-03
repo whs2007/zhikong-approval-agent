@@ -12,7 +12,6 @@ from schemas import ApiResponse
 from services import knowledge_service as ks
 from services.audit_service import EventType, append
 from services.audit_service import query as audit_query
-from services.workflow_service import workflow_service
 
 router = APIRouter(tags=["系统"])
 
@@ -39,17 +38,11 @@ def metrics(_: None = Depends(get_scrape_access)):
 
     返回标准 Prometheus 文本格式（不再是审计表全量 COUNT 的 JSON）。
     鉴权保留：接受有效 JWT 或静态 METRICS_TOKEN（二选一），避免指标被匿名暴露。
+
+    这里**只做内存渲染**，不查库：Gauge 由 `api.main._refresh_gauges_forever`
+    在后台刷新。原因见该函数注释——把查询放在抓取路径上，高负载时会因线程池
+    排队而超时，导致"过载时监控先断流、告警永远不触发"。
     """
-    # Gauge 类瞬时指标需在拉取时刷新：待审批积压数 + 向量后端/索引规模
-    try:
-        pending = workflow_service._pending_sync()
-        metrics_mod.set_pending_approvals(len(pending))
-    except Exception as e:  # pragma: no cover - 指标降级不应影响告警抓取
-        logger.warning(f"[metrics] 刷新待审批数失败: {e}")
-    try:
-        metrics_mod.set_vector_backend(ks.backend_name(), ks.chunk_count())
-    except Exception as e:  # pragma: no cover
-        logger.warning(f"[metrics] 刷新向量后端指标失败: {e}")
     body, content_type = metrics_mod.render_metrics()
     return Response(content=body, media_type=content_type)
 

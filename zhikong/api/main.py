@@ -1,7 +1,8 @@
 """FastAPI 应用装配。"""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,13 +10,39 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.routers import approval, audit, auth, system, workflow
+from core import metrics as metrics_mod
 from core.config import BASE_DIR, settings
 from core.logging import logger
 from core.metrics import MetricsMiddleware
 from core.tracing import TraceIdMiddleware
 from services import knowledge_service as ks
+from services.workflow_service import workflow_service
 
 FRONTEND = BASE_DIR / "frontend" / "index.html"
+
+# 瞬时指标（待审批数 / 向量索引规模）的后台刷新间隔。
+# 10s 足够：这两个都是慢变量，且远小于 Prometheus 的 15s 抓取间隔。
+_GAUGE_REFRESH_SECONDS = 10.0
+
+
+async def _refresh_gauges_forever() -> None:
+    """后台刷新 Gauge，**不占用抓取请求**。
+
+    为什么不能放在 /api/v1/metrics 里算（原来的做法）：
+      该端点是 `def`（同步），FastAPI 会把它丢进默认线程池。业务高峰时线程池
+      被提交请求占满，抓取要排队；实测压测期间一次抓取耗时正好卡在
+      scrape_timeout=10s，Prometheus 判定 up=0，**服务最需要监控时指标先断流**，
+      延迟告警因此永远不会触发（见 docs/22）。
+      改成后台任务后，抓取只读内存里的 Gauge，耗时与业务负载解耦。
+    """
+    while True:
+        try:
+            items = await workflow_service.pending()
+            metrics_mod.set_pending_approvals(len(items))
+            metrics_mod.set_vector_backend(ks.backend_name(), ks.chunk_count())
+        except Exception as e:  # pragma: no cover - 指标刷新失败不应影响主流程
+            logger.warning(f"[metrics] 后台刷新指标失败: {e}")
+        await asyncio.sleep(_GAUGE_REFRESH_SECONDS)
 
 
 @asynccontextmanager
@@ -32,7 +59,14 @@ async def lifespan(app: FastAPI):
         logger.info(f"[startup] 知识库构建完成: {cnt} 块")
     except Exception as e:  # pragma: no cover
         logger.warning(f"[startup] 知识库构建失败: {e}")
-    yield
+
+    refresher = asyncio.create_task(_refresh_gauges_forever(), name="metrics-gauge-refresher")
+    try:
+        yield
+    finally:
+        refresher.cancel()
+        with suppress(asyncio.CancelledError):
+            await refresher
 
 
 app = FastAPI(
