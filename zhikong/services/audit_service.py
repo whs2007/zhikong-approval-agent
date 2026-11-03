@@ -19,6 +19,7 @@ from typing import Any
 
 from core.config import settings
 from core.logging import logger
+from core.sqlite_utils import connect
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -48,9 +49,7 @@ _conn: sqlite3.Connection | None = None
 def _get_conn() -> sqlite3.Connection:
     global _conn
     if _conn is None:
-        _conn = sqlite3.connect(settings.AUDIT_DB, check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
-        _conn.execute("PRAGMA journal_mode=WAL;")
+        _conn = connect(settings.AUDIT_DB, durable=True, row_factory=True)
         _conn.executescript(_SCHEMA)
     return _conn
 

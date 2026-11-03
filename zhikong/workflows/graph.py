@@ -1,13 +1,13 @@
 """LangGraph 工作流编排（StateGraph 编译）。"""
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
 from core.config import settings
 from core.logging import logger
+from core.sqlite_utils import connect
 from workflows.agents import (
     analyst_node,
     approval_gate_node,
@@ -39,7 +39,8 @@ def build_checkpointer():
 
     if cp == "sqlite":
         from langgraph.checkpoint.sqlite import SqliteSaver
-        conn = sqlite3.connect(settings.CHECKPOINTER_DB, check_same_thread=False)
+        # durable=False：checkpoint 是中间状态，可从审计事件重建，用 WAL+NORMAL 换吞吐
+        conn = connect(settings.CHECKPOINTER_DB, durable=False)
         logger.info(f"[checkpointer] 使用 SqliteSaver -> {settings.CHECKPOINTER_DB}")
         return SqliteSaver(conn)
 

@@ -22,6 +22,7 @@ from core.security import (
     validate_username,
     verify_password,
 )
+from core.sqlite_utils import connect
 from models.user import USER_TABLE_DDL, User
 
 _lock = threading.Lock()
@@ -31,8 +32,7 @@ _conn: sqlite3.Connection | None = None
 def _conn_get() -> sqlite3.Connection:
     global _conn
     if _conn is None:
-        _conn = sqlite3.connect(settings.DB_URL.replace("sqlite:///", ""), check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
+        _conn = connect(settings.DB_URL.replace("sqlite:///", ""), durable=True, row_factory=True)
         _conn.executescript(USER_TABLE_DDL)
         _seed()
     return _conn

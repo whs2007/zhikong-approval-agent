@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.config import settings
+from core.sqlite_utils import connect
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS execution_ledger (
@@ -42,8 +43,7 @@ def _c() -> sqlite3.Connection:
     global _conn
     if _conn is None:
         Path(_db_path()).parent.mkdir(parents=True, exist_ok=True)
-        _conn = sqlite3.connect(_db_path(), check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
+        _conn = connect(_db_path(), durable=True, row_factory=True)
         _conn.executescript(_DDL)
         # 迁移：升级前已存在的台账表可能无 status 列，需补列以免 INSERT/UPDATE 失败
         cols = [r[1] for r in _conn.execute("PRAGMA table_info(execution_ledger)").fetchall()]
